@@ -1,15 +1,13 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { Card as CardType, EquityResponse } from './types';
+import React, { useState, useEffect } from 'react';
+import { Card as CardType } from './types';
 import {
   PlayerHand,
   Board,
   CardSelector,
-  ScreenshotUpload,
   EquityDisplay,
 } from './components';
-import { calculateEquity, uploadScreenshot } from './utils/api';
-import { isCardEqual } from './utils/cards';
-import { Plus, Minus, RefreshCw, Trash2 } from 'lucide-react';
+import { calculateEquity, SimulationResult } from './utils/equity';
+import { Plus, Minus, RefreshCw, Trash2, Github } from 'lucide-react';
 
 type Stage = 'preflop' | 'flop' | 'turn' | 'river';
 
@@ -17,6 +15,15 @@ interface SelectionTarget {
   type: 'player' | 'board';
   playerIndex?: number;
   cardIndex: number;
+}
+
+// Convert SimulationResult to EquityDisplay format
+interface DisplayResult {
+  player_index: number;
+  cards: string[];
+  win_percentage: number;
+  tie_percentage: number;
+  equity: number;
 }
 
 function App() {
@@ -34,9 +41,12 @@ function App() {
     null,
   ]);
   const [stage, setStage] = useState<Stage>('preflop');
-  const [equityResult, setEquityResult] = useState<EquityResponse | null>(null);
+  const [equityResult, setEquityResult] = useState<{
+    players: DisplayResult[];
+    stage: string;
+    simulations_run: number;
+  } | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -109,7 +119,7 @@ function App() {
     setSelectionTarget(null);
   };
 
-  // Calculate equity
+  // Calculate equity (now runs locally in the browser)
   const handleCalculate = async () => {
     setError(null);
     setIsCalculating(true);
@@ -127,62 +137,28 @@ function App() {
 
       const board = boardCards.filter((c) => c !== null) as CardType[];
 
-      const result = await calculateEquity(validPlayers, board);
-      setEquityResult(result);
+      // Run calculation in a setTimeout to allow UI to update
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const result: SimulationResult = calculateEquity(validPlayers, board, 10000);
+
+      // Convert to display format
+      setEquityResult({
+        stage: result.stage,
+        simulations_run: result.simulationsRun,
+        players: result.players.map(p => ({
+          player_index: p.playerIndex,
+          cards: p.cards,
+          win_percentage: p.winPercentage,
+          tie_percentage: p.tiePercentage,
+          equity: p.equity,
+        })),
+      });
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to calculate equity';
       setError(errorMessage);
     } finally {
       setIsCalculating(false);
-    }
-  };
-
-  // Handle screenshot upload
-  const handleScreenshotUpload = async (file: File) => {
-    setIsUploading(true);
-    setError(null);
-
-    try {
-      const result = await uploadScreenshot(file, numPlayers);
-
-      if (result.success && result.players.length > 0) {
-        // Update player cards from detection
-        const newPlayerCards = [...playerCards];
-        result.players.forEach((player, idx) => {
-          if (idx < numPlayers && player.cards) {
-            player.cards.forEach((detected, cardIdx) => {
-              if (cardIdx < 4 && detected.rank && detected.suit) {
-                newPlayerCards[idx][cardIdx] = {
-                  rank: detected.rank as CardType['rank'],
-                  suit: detected.suit as CardType['suit'],
-                };
-              }
-            });
-          }
-        });
-        setPlayerCards(newPlayerCards);
-
-        // Update board cards from detection
-        if (result.board.length > 0) {
-          const newBoardCards = [...boardCards];
-          result.board.forEach((detected, idx) => {
-            if (idx < 5 && detected.rank && detected.suit) {
-              newBoardCards[idx] = {
-                rank: detected.rank as CardType['rank'],
-                suit: detected.suit as CardType['suit'],
-              };
-            }
-          });
-          setBoardCards(newBoardCards);
-        }
-      } else {
-        setError(result.message || 'No cards detected in the image');
-      }
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to process screenshot';
-      setError(errorMessage);
-    } finally {
-      setIsUploading(false);
     }
   };
 
@@ -203,9 +179,18 @@ function App() {
             PLO Odds Calculator
           </h1>
           <div className="flex items-center gap-4">
-            <span className="text-gray-400 text-sm">
+            <span className="text-gray-400 text-sm hidden sm:inline">
               Pot Limit Omaha Equity Calculator
             </span>
+            <a
+              href="https://github.com/brentbebuilding/PLO"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-gray-400 hover:text-white transition-colors"
+              title="View on GitHub"
+            >
+              <Github size={20} />
+            </a>
           </div>
         </div>
       </header>
@@ -214,20 +199,6 @@ function App() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left column - Players and Board */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Screenshot Upload */}
-            <div className="bg-gray-800/30 rounded-xl p-6">
-              <h2 className="text-lg font-medium text-white mb-4">
-                Upload Screenshot
-              </h2>
-              <ScreenshotUpload
-                onUpload={handleScreenshotUpload}
-                isLoading={isUploading}
-              />
-              <p className="text-xs text-gray-500 mt-2">
-                Take a screenshot of your poker table and upload it to automatically detect cards
-              </p>
-            </div>
-
             {/* Player controls */}
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-medium text-white">
@@ -238,6 +209,7 @@ function App() {
                   onClick={removePlayer}
                   disabled={numPlayers <= 2}
                   className="p-2 rounded-lg bg-gray-700 text-white disabled:opacity-50 hover:bg-gray-600"
+                  title="Remove player"
                 >
                   <Minus size={16} />
                 </button>
@@ -245,6 +217,7 @@ function App() {
                   onClick={addPlayer}
                   disabled={numPlayers >= 6}
                   className="p-2 rounded-lg bg-gray-700 text-white disabled:opacity-50 hover:bg-gray-600"
+                  title="Add player"
                 >
                   <Plus size={16} />
                 </button>
@@ -336,7 +309,7 @@ function App() {
             <div className="bg-gray-800/30 rounded-xl p-6">
               <h3 className="text-white font-medium mb-3">How to use</h3>
               <ol className="text-gray-400 text-sm space-y-2 list-decimal list-inside">
-                <li>Upload a screenshot or click cards to select manually</li>
+                <li>Click on card slots to select cards for each player</li>
                 <li>Each player needs 4 hole cards (PLO)</li>
                 <li>Add community cards for flop/turn/river</li>
                 <li>Equity updates automatically as you add cards</li>
@@ -352,9 +325,25 @@ function App() {
                 to make the best 5-card hand.
               </p>
             </div>
+
+            {/* Tech info */}
+            <div className="bg-gray-800/30 rounded-xl p-6">
+              <h3 className="text-white font-medium mb-3">About</h3>
+              <p className="text-gray-400 text-sm">
+                This calculator runs entirely in your browser using Monte Carlo
+                simulation with 10,000 iterations. No data is sent to any server.
+              </p>
+            </div>
           </div>
         </div>
       </main>
+
+      {/* Footer */}
+      <footer className="bg-black/30 border-t border-gray-800 px-6 py-4 mt-8">
+        <div className="max-w-6xl mx-auto text-center text-gray-500 text-sm">
+          PLO Odds Calculator - Built with React & TypeScript
+        </div>
+      </footer>
 
       {/* Card Selector Modal */}
       <CardSelector
