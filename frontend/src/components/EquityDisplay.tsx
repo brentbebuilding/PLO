@@ -37,7 +37,7 @@ export const EquityDisplay: React.FC<EquityDisplayProps> = ({
       </div>
 
       <div className="space-y-3">
-        {sortedResults.map((result, idx) => (
+        {sortedResults.map((result) => (
           <div key={result.player_index} className="space-y-1">
             <div className="flex justify-between items-center">
               <span className="text-gray-300">
@@ -66,7 +66,7 @@ export const EquityDisplay: React.FC<EquityDisplayProps> = ({
         <div className="relative w-32 h-32">
           <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
             {sortedResults.reduce(
-              (acc, result, idx) => {
+              (acc, result) => {
                 const start = acc.offset;
                 const size = (result.equity / 100) * 100;
                 acc.elements.push(

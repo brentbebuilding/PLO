@@ -1,6 +1,5 @@
 import React from 'react';
 import { Card as CardType, Suit } from '../types';
-import { Card } from './Card';
 import { RANKS, SUITS, SUIT_SYMBOLS, isCardInArray } from '../utils/cards';
 
 interface CardSelectorProps {
