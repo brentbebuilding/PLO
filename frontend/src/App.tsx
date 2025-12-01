@@ -1,0 +1,370 @@
+import React, { useState, useCallback, useEffect } from 'react';
+import { Card as CardType, EquityResponse } from './types';
+import {
+  PlayerHand,
+  Board,
+  CardSelector,
+  ScreenshotUpload,
+  EquityDisplay,
+} from './components';
+import { calculateEquity, uploadScreenshot } from './utils/api';
+import { isCardEqual } from './utils/cards';
+import { Plus, Minus, RefreshCw, Trash2 } from 'lucide-react';
+
+type Stage = 'preflop' | 'flop' | 'turn' | 'river';
+
+interface SelectionTarget {
+  type: 'player' | 'board';
+  playerIndex?: number;
+  cardIndex: number;
+}
+
+function App() {
+  // State
+  const [numPlayers, setNumPlayers] = useState(2);
+  const [playerCards, setPlayerCards] = useState<(CardType | null)[][]>([
+    [null, null, null, null],
+    [null, null, null, null],
+  ]);
+  const [boardCards, setBoardCards] = useState<(CardType | null)[]>([
+    null,
+    null,
+    null,
+    null,
+    null,
+  ]);
+  const [stage, setStage] = useState<Stage>('preflop');
+  const [equityResult, setEquityResult] = useState<EquityResponse | null>(null);
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Get all used cards
+  const usedCards: (CardType | null)[] = [
+    ...playerCards.flat(),
+    ...boardCards,
+  ];
+
+  // Determine stage from board cards
+  useEffect(() => {
+    const boardCount = boardCards.filter((c) => c !== null).length;
+    if (boardCount === 0) setStage('preflop');
+    else if (boardCount <= 3) setStage('flop');
+    else if (boardCount === 4) setStage('turn');
+    else setStage('river');
+  }, [boardCards]);
+
+  // Auto-calculate equity when cards change
+  useEffect(() => {
+    const canCalculate = playerCards.every((hand) =>
+      hand.every((card) => card !== null)
+    );
+
+    if (canCalculate) {
+      handleCalculate();
+    } else {
+      setEquityResult(null);
+    }
+  }, [playerCards, boardCards]);
+
+  // Add/remove players
+  const addPlayer = () => {
+    if (numPlayers < 6) {
+      setNumPlayers(numPlayers + 1);
+      setPlayerCards([...playerCards, [null, null, null, null]]);
+    }
+  };
+
+  const removePlayer = () => {
+    if (numPlayers > 2) {
+      setNumPlayers(numPlayers - 1);
+      setPlayerCards(playerCards.slice(0, -1));
+    }
+  };
+
+  // Handle card selection
+  const openCardSelector = (target: SelectionTarget) => {
+    setSelectionTarget(target);
+    setSelectorOpen(true);
+  };
+
+  const handleCardSelect = (card: CardType) => {
+    if (!selectionTarget) return;
+
+    if (selectionTarget.type === 'player' && selectionTarget.playerIndex !== undefined) {
+      const newPlayerCards = [...playerCards];
+      newPlayerCards[selectionTarget.playerIndex] = [
+        ...newPlayerCards[selectionTarget.playerIndex],
+      ];
+      newPlayerCards[selectionTarget.playerIndex][selectionTarget.cardIndex] = card;
+      setPlayerCards(newPlayerCards);
+    } else if (selectionTarget.type === 'board') {
+      const newBoardCards = [...boardCards];
+      newBoardCards[selectionTarget.cardIndex] = card;
+      setBoardCards(newBoardCards);
+    }
+
+    setSelectionTarget(null);
+  };
+
+  // Calculate equity
+  const handleCalculate = async () => {
+    setError(null);
+    setIsCalculating(true);
+
+    try {
+      const validPlayers = playerCards.filter((hand) =>
+        hand.every((c) => c !== null)
+      ) as CardType[][];
+
+      if (validPlayers.length < 2) {
+        setError('Need at least 2 players with complete hands');
+        setIsCalculating(false);
+        return;
+      }
+
+      const board = boardCards.filter((c) => c !== null) as CardType[];
+
+      const result = await calculateEquity(validPlayers, board);
+      setEquityResult(result);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to calculate equity';
+      setError(errorMessage);
+    } finally {
+      setIsCalculating(false);
+    }
+  };
+
+  // Handle screenshot upload
+  const handleScreenshotUpload = async (file: File) => {
+    setIsUploading(true);
+    setError(null);
+
+    try {
+      const result = await uploadScreenshot(file, numPlayers);
+
+      if (result.success && result.players.length > 0) {
+        // Update player cards from detection
+        const newPlayerCards = [...playerCards];
+        result.players.forEach((player, idx) => {
+          if (idx < numPlayers && player.cards) {
+            player.cards.forEach((detected, cardIdx) => {
+              if (cardIdx < 4 && detected.rank && detected.suit) {
+                newPlayerCards[idx][cardIdx] = {
+                  rank: detected.rank as CardType['rank'],
+                  suit: detected.suit as CardType['suit'],
+                };
+              }
+            });
+          }
+        });
+        setPlayerCards(newPlayerCards);
+
+        // Update board cards from detection
+        if (result.board.length > 0) {
+          const newBoardCards = [...boardCards];
+          result.board.forEach((detected, idx) => {
+            if (idx < 5 && detected.rank && detected.suit) {
+              newBoardCards[idx] = {
+                rank: detected.rank as CardType['rank'],
+                suit: detected.suit as CardType['suit'],
+              };
+            }
+          });
+          setBoardCards(newBoardCards);
+        }
+      } else {
+        setError(result.message || 'No cards detected in the image');
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to process screenshot';
+      setError(errorMessage);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Clear all
+  const handleClear = () => {
+    setPlayerCards(Array(numPlayers).fill(null).map(() => [null, null, null, null]));
+    setBoardCards([null, null, null, null, null]);
+    setEquityResult(null);
+    setError(null);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-poker-felt to-gray-900">
+      {/* Header */}
+      <header className="bg-black/30 border-b border-gray-800 px-6 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-white">
+            PLO Odds Calculator
+          </h1>
+          <div className="flex items-center gap-4">
+            <span className="text-gray-400 text-sm">
+              Pot Limit Omaha Equity Calculator
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-6 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left column - Players and Board */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Screenshot Upload */}
+            <div className="bg-gray-800/30 rounded-xl p-6">
+              <h2 className="text-lg font-medium text-white mb-4">
+                Upload Screenshot
+              </h2>
+              <ScreenshotUpload
+                onUpload={handleScreenshotUpload}
+                isLoading={isUploading}
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                Take a screenshot of your poker table and upload it to automatically detect cards
+              </p>
+            </div>
+
+            {/* Player controls */}
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-medium text-white">
+                Players ({numPlayers})
+              </h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={removePlayer}
+                  disabled={numPlayers <= 2}
+                  className="p-2 rounded-lg bg-gray-700 text-white disabled:opacity-50 hover:bg-gray-600"
+                >
+                  <Minus size={16} />
+                </button>
+                <button
+                  onClick={addPlayer}
+                  disabled={numPlayers >= 6}
+                  className="p-2 rounded-lg bg-gray-700 text-white disabled:opacity-50 hover:bg-gray-600"
+                >
+                  <Plus size={16} />
+                </button>
+                <button
+                  onClick={handleClear}
+                  className="p-2 rounded-lg bg-red-700 text-white hover:bg-red-600 ml-2"
+                  title="Clear all cards"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Player hands */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {playerCards.map((cards, playerIdx) => (
+                <PlayerHand
+                  key={playerIdx}
+                  playerIndex={playerIdx}
+                  cards={cards}
+                  equity={equityResult?.players[playerIdx]?.equity}
+                  winPercentage={equityResult?.players[playerIdx]?.win_percentage}
+                  tiePercentage={equityResult?.players[playerIdx]?.tie_percentage}
+                  onCardClick={(cardIdx) =>
+                    openCardSelector({
+                      type: 'player',
+                      playerIndex: playerIdx,
+                      cardIndex: cardIdx,
+                    })
+                  }
+                  isHero={playerIdx === 0}
+                />
+              ))}
+            </div>
+
+            {/* Board */}
+            <Board
+              cards={boardCards}
+              onCardClick={(cardIdx) =>
+                openCardSelector({ type: 'board', cardIndex: cardIdx })
+              }
+              stage={stage}
+            />
+
+            {/* Calculate button */}
+            <button
+              onClick={handleCalculate}
+              disabled={isCalculating}
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white font-medium rounded-lg flex items-center justify-center gap-2 transition-colors"
+            >
+              {isCalculating ? (
+                <>
+                  <RefreshCw className="animate-spin" size={20} />
+                  Calculating...
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={20} />
+                  Calculate Equity
+                </>
+              )}
+            </button>
+
+            {/* Error display */}
+            {error && (
+              <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-3 rounded-lg">
+                {error}
+              </div>
+            )}
+          </div>
+
+          {/* Right column - Results */}
+          <div className="space-y-6">
+            {equityResult ? (
+              <EquityDisplay
+                results={equityResult.players}
+                stage={equityResult.stage}
+                simulations={equityResult.simulations_run}
+              />
+            ) : (
+              <div className="bg-gray-800/30 rounded-xl p-6 text-center">
+                <p className="text-gray-400">
+                  Select cards for all players to calculate equity
+                </p>
+              </div>
+            )}
+
+            {/* Instructions */}
+            <div className="bg-gray-800/30 rounded-xl p-6">
+              <h3 className="text-white font-medium mb-3">How to use</h3>
+              <ol className="text-gray-400 text-sm space-y-2 list-decimal list-inside">
+                <li>Upload a screenshot or click cards to select manually</li>
+                <li>Each player needs 4 hole cards (PLO)</li>
+                <li>Add community cards for flop/turn/river</li>
+                <li>Equity updates automatically as you add cards</li>
+              </ol>
+            </div>
+
+            {/* PLO Rules */}
+            <div className="bg-gray-800/30 rounded-xl p-6">
+              <h3 className="text-white font-medium mb-3">PLO Rules</h3>
+              <p className="text-gray-400 text-sm">
+                In Pot Limit Omaha, each player receives 4 hole cards and must
+                use exactly 2 of them combined with exactly 3 community cards
+                to make the best 5-card hand.
+              </p>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {/* Card Selector Modal */}
+      <CardSelector
+        isOpen={selectorOpen}
+        onClose={() => setSelectorOpen(false)}
+        onSelect={handleCardSelect}
+        usedCards={usedCards}
+      />
+    </div>
+  );
+}
+
+export default App;

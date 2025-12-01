@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Card suit colors */
+.suit-hearts, .suit-diamonds {
+  color: #c62828;
+}
+
+.suit-clubs, .suit-spades {
+  color: #212121;
+}
+
+/* Poker table gradient */
+.poker-table {
+  background: radial-gradient(ellipse at center, #2d5a3d 0%, #1a472a 70%, #0d2818 100%);
+}
+
+/* Card hover effects */
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* Selection ring */
+.card-selected {
+  ring: 2px;
+  ring-color: #fbbf24;
+}
