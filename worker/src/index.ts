@@ -189,15 +189,19 @@ async function detectCardsWithRoboflow(base64Image: string, apiKey: string): Pro
   // Remove data URL prefix if present
   const imageData = base64Image.replace(/^data:image\/\w+;base64,/, '');
 
-  // Roboflow serverless endpoint
-  const ROBOFLOW_URL = 'https://serverless.roboflow.com/playing-cards-pquad-t4ks2/1';
+  // Roboflow hosted inference endpoint (workspace/project/version)
+  const ROBOFLOW_URL = 'https://detect.roboflow.com/plo-rnb8s/playing-cards-pquad-t4ks2/1';
   const ROBOFLOW_KEY = apiKey || '5rpPWbm9rQNydbi4VDgn';
 
-  // Pass base64 image as query parameter (URL-encoded)
+  // Send base64 image in request body
   const response = await fetch(
-    `${ROBOFLOW_URL}?api_key=${ROBOFLOW_KEY}&image=${encodeURIComponent(base64Image)}`,
+    `${ROBOFLOW_URL}?api_key=${ROBOFLOW_KEY}`,
     {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: imageData,
     }
   );
 
