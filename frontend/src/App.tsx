@@ -5,6 +5,7 @@ import {
   Board,
   CardSelector,
   EquityDisplay,
+  ScreenshotReference,
 } from './components';
 import { calculateEquity, SimulationResult } from './utils/equity';
 import { Plus, Minus, RefreshCw, Trash2, Github } from 'lucide-react';
@@ -199,6 +200,9 @@ function App() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left column - Players and Board */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Screenshot Reference */}
+            <ScreenshotReference />
+
             {/* Player controls */}
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-medium text-white">
