@@ -1,12 +1,13 @@
 /**
- * Cloudflare Worker for PLO Card Detection using Google Gemini Vision API
+ * Cloudflare Worker for PLO Card Detection using Roboflow Vision API
  *
  * Analyzes poker screenshots and returns detected cards.
- * Uses Gemini 1.5 Flash which has a FREE tier (1,500 requests/day)
+ * Uses Roboflow's hosted inference for playing card detection.
  */
 
 interface Env {
-  GEMINI_API_KEY: string;
+  ROBOFLOW_API_KEY: string;
+  GEMINI_API_KEY?: string; // Optional fallback
 }
 
 interface CardDetectionRequest {
@@ -18,6 +19,23 @@ interface DetectedCards {
   villain: string;
   board: string;
   analysis?: string;
+}
+
+interface RoboflowPrediction {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  class: string;
+  confidence: number;
+}
+
+interface RoboflowResponse {
+  predictions: RoboflowPrediction[];
+  image: {
+    width: number;
+    height: number;
+  };
 }
 
 const CORS_HEADERS = {
@@ -50,8 +68,8 @@ export default {
         });
       }
 
-      // Call Gemini Vision API
-      const cards = await detectCardsWithGemini(body.image, env.GEMINI_API_KEY);
+      // Call Roboflow Vision API
+      const cards = await detectCardsWithRoboflow(body.image, env.ROBOFLOW_API_KEY);
 
       return new Response(JSON.stringify(cards), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -68,108 +86,140 @@ export default {
   },
 };
 
-async function detectCardsWithGemini(base64Image: string, apiKey: string): Promise<DetectedCards> {
+/**
+ * Normalize card class name from Roboflow to standard notation
+ * Handles various formats like "Ah", "ace-hearts", "A-h", "ace_of_hearts", etc.
+ */
+function normalizeCardClass(className: string): string {
+  // Already in standard format (e.g., "Ah", "Ks", "Td")
+  if (/^[AKQJT2-9][hdcs]$/i.test(className)) {
+    const rank = className[0].toUpperCase();
+    const suit = className[1].toLowerCase();
+    return `${rank === '1' ? 'T' : rank}${suit}`;
+  }
+
+  // Handle "10" as rank
+  if (/^10[hdcs]$/i.test(className)) {
+    return `T${className[2].toLowerCase()}`;
+  }
+
+  // Parse longer formats like "ace-hearts", "king_of_spades", etc.
+  const normalized = className.toLowerCase().replace(/[_-]/g, ' ').replace(/\s+of\s+/g, ' ');
+
+  const rankMap: Record<string, string> = {
+    'ace': 'A', 'king': 'K', 'queen': 'Q', 'jack': 'J', 'ten': 'T', '10': 'T',
+    'nine': '9', '9': '9', 'eight': '8', '8': '8', 'seven': '7', '7': '7',
+    'six': '6', '6': '6', 'five': '5', '5': '5', 'four': '4', '4': '4',
+    'three': '3', '3': '3', 'two': '2', '2': '2',
+    'a': 'A', 'k': 'K', 'q': 'Q', 'j': 'J', 't': 'T'
+  };
+
+  const suitMap: Record<string, string> = {
+    'hearts': 'h', 'heart': 'h', 'h': 'h',
+    'diamonds': 'd', 'diamond': 'd', 'd': 'd',
+    'clubs': 'c', 'club': 'c', 'c': 'c',
+    'spades': 's', 'spade': 's', 's': 's'
+  };
+
+  let rank = '';
+  let suit = '';
+
+  for (const [key, value] of Object.entries(rankMap)) {
+    if (normalized.includes(key)) {
+      rank = value;
+      break;
+    }
+  }
+
+  for (const [key, value] of Object.entries(suitMap)) {
+    if (normalized.includes(key)) {
+      suit = value;
+      break;
+    }
+  }
+
+  if (rank && suit) {
+    return `${rank}${suit}`;
+  }
+
+  // Return original if we can't parse it
+  return className;
+}
+
+/**
+ * Categorize detected cards into hero, villain, and board based on Y position
+ * Hero cards are at the bottom, board in the middle, villain at the top
+ */
+function categorizeCardsByPosition(
+  predictions: RoboflowPrediction[],
+  imageHeight: number
+): DetectedCards {
+  // Filter by confidence threshold
+  const confidentPredictions = predictions.filter(p => p.confidence > 0.5);
+
+  if (confidentPredictions.length === 0) {
+    return { hero: '', villain: '', board: '', analysis: 'No cards detected with sufficient confidence' };
+  }
+
+  // Sort by Y position (top to bottom)
+  const sorted = [...confidentPredictions].sort((a, b) => a.y - b.y);
+
+  // Determine zones based on image height
+  // Top third = villain, middle third = board, bottom third = hero
+  const topThreshold = imageHeight * 0.35;
+  const bottomThreshold = imageHeight * 0.65;
+
+  // Sort cards within each group by X position (left to right)
+  const sortByX = (cards: RoboflowPrediction[]) =>
+    cards.sort((a, b) => a.x - b.x).map(p => normalizeCardClass(p.class));
+
+  const villainSorted = sortByX(sorted.filter(p => p.y < topThreshold));
+  const boardSorted = sortByX(sorted.filter(p => p.y >= topThreshold && p.y <= bottomThreshold));
+  const heroSorted = sortByX(sorted.filter(p => p.y > bottomThreshold));
+
+  return {
+    hero: heroSorted.join(' '),
+    villain: villainSorted.join(' '),
+    board: boardSorted.join(' '),
+    analysis: `Detected ${confidentPredictions.length} cards via Roboflow`
+  };
+}
+
+async function detectCardsWithRoboflow(base64Image: string, apiKey: string): Promise<DetectedCards> {
   // Remove data URL prefix if present
   const imageData = base64Image.replace(/^data:image\/\w+;base64,/, '');
 
-  // Determine mime type
-  let mimeType = 'image/png';
-  if (base64Image.startsWith('data:image/jpeg')) {
-    mimeType = 'image/jpeg';
-  } else if (base64Image.startsWith('data:image/webp')) {
-    mimeType = 'image/webp';
-  }
-
-  const prompt = `Analyze this ClubWPT Gold poker screenshot and identify all visible cards.
-
-ClubWPT Gold uses these colors for suits:
-- BLUE = Diamonds (d)
-- GREEN = Clubs (c)
-- RED = Hearts (h)
-- BLACK = Spades (s)
-
-Return ONLY a JSON object in this exact format (no other text, no markdown):
-{
-  "hero": "Ad Qc Jc 7s",
-  "villain": "As Ks Ts 9c",
-  "board": "6s 7s 6c 3d Qs",
-  "analysis": "Brief description of the hand"
-}
-
-Rules:
-- Use standard notation: A=Ace, K=King, Q=Queen, J=Jack, T=10, 9-2
-- Suits: d=diamonds, c=clubs, h=hearts, s=spades
-- Hero is usually bottom-left player (often has dealer button or is the main player)
-- Villain is the other active player (not folded)
-- Board is the community cards in the center
-- Leave empty string "" if cards not visible
-- Only include players who have visible cards (not folded)`;
+  // Roboflow serverless endpoint
+  const ROBOFLOW_URL = 'https://serverless.roboflow.com/playing-cards-pquad-t4ks2/1';
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    `${ROBOFLOW_URL}?api_key=${apiKey}`,
     {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: mimeType,
-                  data: imageData,
-                },
-              },
-              {
-                text: prompt,
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 1024,
-        },
-      }),
+      body: imageData,
     }
   );
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Gemini API error: ${error}`);
+    throw new Error(`Roboflow API error: ${error}`);
   }
 
-  const result = await response.json() as {
-    candidates?: Array<{
-      content?: {
-        parts?: Array<{ text?: string }>;
-      };
-    }>;
-  };
+  const result = await response.json() as RoboflowResponse;
 
-  // Extract the text response
-  const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error('No response from Gemini');
-  }
-
-  // Parse the JSON from Gemini's response
-  try {
-    // Try to extract JSON from the response (might have markdown code blocks)
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]) as DetectedCards;
-    }
-    throw new Error('No JSON found in response');
-  } catch {
-    // If parsing fails, return the raw text as analysis
+  if (!result.predictions || result.predictions.length === 0) {
     return {
       hero: '',
       villain: '',
       board: '',
-      analysis: text,
+      analysis: 'No cards detected in image'
     };
   }
+
+  // Categorize cards by their position in the image
+  const imageHeight = result.image?.height || 1080;
+  return categorizeCardsByPosition(result.predictions, imageHeight);
 }
