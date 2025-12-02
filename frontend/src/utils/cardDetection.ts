@@ -1,8 +1,14 @@
 /**
- * Card Detection from Poker Screenshots
+ * Card Detection for ClubWPT Gold Screenshots
  *
- * Analyzes poker screenshots to detect and identify playing cards.
- * Uses color analysis and pattern matching.
+ * ClubWPT Gold color scheme:
+ * - Diamonds = BLUE
+ * - Clubs = GREEN
+ * - Spades = BLACK
+ * - Hearts = RED
+ *
+ * Cards have dark backgrounds with colored rank/suit symbols.
+ * Winning hands appear brighter, losing hands are greyed out.
  */
 
 import { Card, Rank, Suit } from '../types';
@@ -20,16 +26,14 @@ interface DetectionResult {
   message?: string;
 }
 
-interface CardRegion {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  imageData: ImageData;
-}
+// ClubWPT Gold suit colors reference:
+// - Diamonds = BLUE (b > 150, b > r+50, b > g)
+// - Clubs = GREEN (g > 120, g > r+30, g > b+30)
+// - Hearts = RED (r > 150, r > g+50, r > b+50)
+// - Spades = BLACK (hard to distinguish from background)
 
 /**
- * Main detection function - analyzes an image and returns detected cards
+ * Main detection function - analyzes a ClubWPT Gold screenshot
  */
 export async function detectCardsFromImage(
   imageData: string,
@@ -51,7 +55,7 @@ export async function detectCardsFromImage(
       ctx.drawImage(img, 0, 0);
 
       try {
-        const result = analyzePokerTable(ctx, canvas.width, canvas.height, numPlayers);
+        const result = analyzeClubWPTTable(ctx, canvas.width, canvas.height, numPlayers);
         resolve(result);
       } catch (error) {
         resolve({
@@ -72,36 +76,42 @@ export async function detectCardsFromImage(
 }
 
 /**
- * Analyze the poker table image to find cards
+ * Analyze ClubWPT Gold table for cards
  */
-function analyzePokerTable(
+function analyzeClubWPTTable(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   numPlayers: number
 ): DetectionResult {
-  // Find all card-like regions in the image
-  const cardRegions = findCardRegions(ctx, width, height);
+  const imageData = ctx.getImageData(0, 0, width, height);
 
-  if (cardRegions.length === 0) {
+  // Find colored regions that match suit colors
+  const coloredRegions = findColoredRegions(imageData, width, height);
+
+  if (coloredRegions.length === 0) {
     return {
       success: false,
       playerCards: [],
       boardCards: [],
-      message: 'No cards detected. Try a clearer screenshot.'
+      message: 'No card colors detected. Make sure the screenshot shows card faces.'
     };
   }
 
-  // Identify each card
-  const identifiedCards: DetectedCard[] = [];
-  for (const region of cardRegions) {
-    const card = identifyCard(region);
-    if (card) {
-      identifiedCards.push(card);
-    }
-  }
+  // Group nearby colored pixels into card regions
+  const cardRegions = groupIntoCards(coloredRegions, width, height);
 
-  // Group cards by position (board vs players)
+  // Identify each card based on color
+  const identifiedCards: DetectedCard[] = cardRegions.map(region => ({
+    card: {
+      rank: 'A' as Rank, // Rank detection requires more sophisticated analysis
+      suit: region.suit
+    },
+    confidence: region.confidence,
+    bounds: region.bounds
+  }));
+
+  // Group cards by position
   const { playerCards, boardCards } = groupCardsByPosition(
     identifiedCards,
     width,
@@ -113,223 +123,157 @@ function analyzePokerTable(
     success: identifiedCards.length > 0,
     playerCards,
     boardCards,
-    message: `Detected ${identifiedCards.length} cards`
+    message: `Detected ${identifiedCards.length} cards (suits identified, ranks need manual selection)`
   };
 }
 
+interface ColoredPixel {
+  x: number;
+  y: number;
+  suit: Suit;
+  brightness: number;
+}
+
 /**
- * Find rectangular regions that look like playing cards
+ * Find pixels that match ClubWPT Gold suit colors
  */
-function findCardRegions(
-  ctx: CanvasRenderingContext2D,
+function findColoredRegions(
+  imageData: ImageData,
   width: number,
   height: number
-): CardRegion[] {
-  const regions: CardRegion[] = [];
-  const imageData = ctx.getImageData(0, 0, width, height);
+): ColoredPixel[] {
+  const pixels: ColoredPixel[] = [];
   const data = imageData.data;
 
-  // Scan for white/light colored rectangular regions
-  const gridSize = 20; // Scan in grid pattern for efficiency
-  const visited = new Set<string>();
+  // Sample every few pixels for performance
+  const step = 3;
 
-  for (let y = 0; y < height; y += gridSize) {
-    for (let x = 0; x < width; x += gridSize) {
-      const key = `${Math.floor(x / gridSize)},${Math.floor(y / gridSize)}`;
-      if (visited.has(key)) continue;
-      visited.add(key);
-
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
       const idx = (y * width + x) * 4;
       const r = data[idx];
       const g = data[idx + 1];
       const b = data[idx + 2];
 
-      // Check if this pixel is light colored (potential card background)
-      if (isLightColor(r, g, b)) {
-        // Try to expand this into a card region
-        const region = expandCardRegion(ctx, x, y, width, height);
-        if (region && isValidCardRegion(region)) {
-          regions.push(region);
-          // Mark surrounding area as visited
-          markVisited(visited, region, gridSize);
+      const brightness = (r + g + b) / 3;
+
+      // Check each suit color
+      const suit = identifySuitFromColor(r, g, b);
+      if (suit) {
+        pixels.push({ x, y, suit, brightness });
+      }
+    }
+  }
+
+  return pixels;
+}
+
+/**
+ * Identify suit based on RGB color
+ */
+function identifySuitFromColor(r: number, g: number, b: number): Suit | null {
+  // Blue = Diamonds
+  if (b > 150 && b > r + 50 && b > g) {
+    return 'd';
+  }
+
+  // Green = Clubs
+  if (g > 120 && g > r + 30 && g > b + 30) {
+    return 'c';
+  }
+
+  // Red = Hearts
+  if (r > 150 && r > g + 50 && r > b + 50) {
+    return 'h';
+  }
+
+  // Black = Spades (need to check it's on a card, not just dark background)
+  // Only count as spade if surrounded by lighter pixels (card background)
+  // This is tricky - skip for now as black is ambiguous
+
+  return null;
+}
+
+interface CardRegion {
+  suit: Suit;
+  bounds: { x: number; y: number; width: number; height: number };
+  confidence: number;
+  pixelCount: number;
+}
+
+/**
+ * Group colored pixels into card regions
+ */
+function groupIntoCards(
+  pixels: ColoredPixel[],
+  _width: number,
+  _height: number
+): CardRegion[] {
+  if (pixels.length === 0) return [];
+
+  // Simple clustering - group pixels within certain distance
+  const clusters: ColoredPixel[][] = [];
+  const used = new Set<number>();
+  const clusterDistance = 50; // pixels within this distance belong to same card
+
+  for (let i = 0; i < pixels.length; i++) {
+    if (used.has(i)) continue;
+
+    const cluster: ColoredPixel[] = [pixels[i]];
+    used.add(i);
+
+    // Find all pixels close to this cluster
+    for (let j = i + 1; j < pixels.length; j++) {
+      if (used.has(j)) continue;
+
+      // Check if pixel j is close to any pixel in cluster
+      for (const cp of cluster) {
+        const dist = Math.sqrt(
+          Math.pow(pixels[j].x - cp.x, 2) +
+          Math.pow(pixels[j].y - cp.y, 2)
+        );
+        if (dist < clusterDistance && pixels[j].suit === cp.suit) {
+          cluster.push(pixels[j]);
+          used.add(j);
+          break;
         }
       }
     }
-  }
 
-  return regions;
-}
-
-/**
- * Check if a color is light (potential card background)
- */
-function isLightColor(r: number, g: number, b: number): boolean {
-  const brightness = (r + g + b) / 3;
-  return brightness > 180 && Math.abs(r - g) < 30 && Math.abs(g - b) < 30;
-}
-
-/**
- * Expand from a seed point to find card boundaries
- */
-function expandCardRegion(
-  ctx: CanvasRenderingContext2D,
-  seedX: number,
-  seedY: number,
-  imgWidth: number,
-  imgHeight: number
-): CardRegion | null {
-  // Expected card dimensions (will vary by screenshot resolution)
-  const minWidth = 30;
-  const maxWidth = 150;
-  const minHeight = 40;
-  const maxHeight = 200;
-
-  // Find boundaries by scanning outward
-  let left = seedX;
-  let right = seedX;
-  let top = seedY;
-  let bottom = seedY;
-
-  const imageData = ctx.getImageData(0, 0, imgWidth, imgHeight);
-  const data = imageData.data;
-
-  // Expand left
-  while (left > 0 && isCardPixel(data, left - 1, seedY, imgWidth)) {
-    left--;
-    if (seedX - left > maxWidth / 2) break;
-  }
-
-  // Expand right
-  while (right < imgWidth - 1 && isCardPixel(data, right + 1, seedY, imgWidth)) {
-    right++;
-    if (right - seedX > maxWidth / 2) break;
-  }
-
-  // Expand up
-  while (top > 0 && isCardPixel(data, seedX, top - 1, imgWidth)) {
-    top--;
-    if (seedY - top > maxHeight / 2) break;
-  }
-
-  // Expand down
-  while (bottom < imgHeight - 1 && isCardPixel(data, seedX, bottom + 1, imgWidth)) {
-    bottom++;
-    if (bottom - seedY > maxHeight / 2) break;
-  }
-
-  const width = right - left;
-  const height = bottom - top;
-
-  if (width < minWidth || width > maxWidth || height < minHeight || height > maxHeight) {
-    return null;
-  }
-
-  return {
-    x: left,
-    y: top,
-    width,
-    height,
-    imageData: ctx.getImageData(left, top, width, height)
-  };
-}
-
-/**
- * Check if a pixel belongs to a card (light colored)
- */
-function isCardPixel(data: Uint8ClampedArray, x: number, y: number, width: number): boolean {
-  const idx = (y * width + x) * 4;
-  return isLightColor(data[idx], data[idx + 1], data[idx + 2]);
-}
-
-/**
- * Validate that a region looks like a card (aspect ratio check)
- */
-function isValidCardRegion(region: CardRegion): boolean {
-  const aspectRatio = region.width / region.height;
-  // Cards are typically taller than wide, aspect ratio around 0.6-0.8
-  return aspectRatio > 0.5 && aspectRatio < 0.9;
-}
-
-/**
- * Mark grid cells as visited
- */
-function markVisited(visited: Set<string>, region: CardRegion, gridSize: number): void {
-  const startX = Math.floor(region.x / gridSize);
-  const endX = Math.floor((region.x + region.width) / gridSize);
-  const startY = Math.floor(region.y / gridSize);
-  const endY = Math.floor((region.y + region.height) / gridSize);
-
-  for (let y = startY; y <= endY; y++) {
-    for (let x = startX; x <= endX; x++) {
-      visited.add(`${x},${y}`);
-    }
-  }
-}
-
-/**
- * Identify the rank and suit of a card from its image region
- */
-function identifyCard(region: CardRegion): DetectedCard | null {
-  const { imageData, x, y, width, height } = region;
-  const data = imageData.data;
-
-  // Analyze the top-left corner for rank/suit (that's where they appear on cards)
-  const cornerWidth = Math.floor(width * 0.4);
-  const cornerHeight = Math.floor(height * 0.35);
-
-  // Count red vs black pixels to determine suit color
-  let redPixels = 0;
-  let blackPixels = 0;
-  let totalColoredPixels = 0;
-
-  for (let cy = 0; cy < cornerHeight; cy++) {
-    for (let cx = 0; cx < cornerWidth; cx++) {
-      const idx = (cy * width + cx) * 4;
-      const r = data[idx];
-      const g = data[idx + 1];
-      const b = data[idx + 2];
-
-      // Skip light/white pixels
-      if (isLightColor(r, g, b)) continue;
-
-      totalColoredPixels++;
-
-      // Check if red (hearts/diamonds)
-      if (r > 150 && g < 100 && b < 100) {
-        redPixels++;
-      }
-      // Check if black (clubs/spades)
-      else if (r < 80 && g < 80 && b < 80) {
-        blackPixels++;
-      }
+    if (cluster.length >= 5) { // Minimum pixels to be a card
+      clusters.push(cluster);
     }
   }
 
-  if (totalColoredPixels < 20) {
-    return null; // Not enough data to identify
-  }
+  // Convert clusters to card regions
+  return clusters.map(cluster => {
+    const xs = cluster.map(p => p.x);
+    const ys = cluster.map(p => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
 
-  // Determine suit based on color
-  const isRed = redPixels > blackPixels;
+    // Most common suit in cluster
+    const suitCounts: Record<string, number> = {};
+    for (const p of cluster) {
+      suitCounts[p.suit] = (suitCounts[p.suit] || 0) + 1;
+    }
+    const suit = Object.entries(suitCounts)
+      .sort((a, b) => b[1] - a[1])[0][0] as Suit;
 
-  // For now, default to hearts/spades (most common)
-  // More sophisticated detection could analyze shapes
-  const suit: Suit = isRed ? 'h' : 's';
-
-  // Rank detection is harder - would need OCR or template matching
-  // For now, return a placeholder that user can correct
-  const rank: Rank = 'A'; // Placeholder
-
-  const confidence = Math.min(
-    (Math.max(redPixels, blackPixels) / totalColoredPixels) * 100,
-    80
-  );
-
-  return {
-    card: { rank, suit },
-    confidence,
-    bounds: { x, y, width, height }
-  };
+    return {
+      suit,
+      bounds: {
+        x: minX,
+        y: minY,
+        width: maxX - minX,
+        height: maxY - minY
+      },
+      confidence: Math.min(cluster.length / 20 * 100, 90),
+      pixelCount: cluster.length
+    };
+  });
 }
 
 /**
@@ -347,25 +291,33 @@ function groupCardsByPosition(
   // Sort cards by vertical position
   const sortedCards = [...cards].sort((a, b) => a.bounds.y - b.bounds.y);
 
-  // Cards in the middle third vertically are likely board cards
-  const middleStart = imageHeight * 0.3;
-  const middleEnd = imageHeight * 0.5;
+  // ClubWPT Gold layout:
+  // - Board cards are in the center (roughly 35-50% from top)
+  // - Hero cards are at bottom left (70%+ from top, left side)
+  // - Villain cards are on the right side
 
-  // Cards in the bottom third are likely player cards
-  const bottomStart = imageHeight * 0.6;
+  const boardTop = imageHeight * 0.30;
+  const boardBottom = imageHeight * 0.55;
+  const heroBottom = imageHeight * 0.60;
 
   for (const card of sortedCards) {
     const centerY = card.bounds.y + card.bounds.height / 2;
     const centerX = card.bounds.x + card.bounds.width / 2;
 
-    if (centerY >= middleStart && centerY <= middleEnd) {
-      // Board card
+    if (centerY >= boardTop && centerY <= boardBottom && centerX > imageWidth * 0.25 && centerX < imageWidth * 0.75) {
+      // Board card (center of table)
       boardCards.push(card);
-    } else if (centerY >= bottomStart) {
-      // Player card - assign to player based on horizontal position
-      const playerIndex = Math.floor((centerX / imageWidth) * numPlayers);
-      const clampedIndex = Math.max(0, Math.min(numPlayers - 1, playerIndex));
-      playerCards[clampedIndex].push(card);
+    } else if (centerY >= heroBottom) {
+      // Player card - determine which player based on horizontal position
+      if (centerX < imageWidth * 0.4) {
+        // Hero (left side)
+        playerCards[0].push(card);
+      } else if (centerX > imageWidth * 0.6) {
+        // Villain (right side)
+        if (numPlayers > 1) {
+          playerCards[1].push(card);
+        }
+      }
     }
   }
 
@@ -397,23 +349,39 @@ export function drawDetectionResults(
     canvas.height = img.height;
     ctx.drawImage(img, 0, 0);
 
-    // Draw boxes around detected cards
-    ctx.strokeStyle = '#00ff00';
-    ctx.lineWidth = 2;
+    // Draw boxes around detected cards with suit colors
+    const suitColors: Record<Suit, string> = {
+      'd': '#0088ff', // Blue for diamonds
+      'c': '#00cc00', // Green for clubs
+      'h': '#ff0000', // Red for hearts
+      's': '#333333'  // Dark gray for spades
+    };
+
+    ctx.lineWidth = 3;
 
     for (const playerHand of result.playerCards) {
       for (const card of playerHand) {
+        ctx.strokeStyle = suitColors[card.card.suit];
         ctx.strokeRect(
           card.bounds.x,
           card.bounds.y,
           card.bounds.width,
           card.bounds.height
         );
+        // Label
+        ctx.fillStyle = suitColors[card.card.suit];
+        ctx.font = '14px Arial';
+        ctx.fillText(
+          `${card.card.rank}${card.card.suit}`,
+          card.bounds.x,
+          card.bounds.y - 5
+        );
       }
     }
 
     ctx.strokeStyle = '#ffff00';
     for (const card of result.boardCards) {
+      ctx.strokeStyle = suitColors[card.card.suit];
       ctx.strokeRect(
         card.bounds.x,
         card.bounds.y,
