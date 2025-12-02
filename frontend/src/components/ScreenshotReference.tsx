@@ -1,7 +1,60 @@
-import { useCallback, useState } from 'react';
-import { Upload, X, Image, MousePointer, Info, Zap, Loader2, Settings } from 'lucide-react';
+import { useCallback, useState, useRef } from 'react';
+import { Upload, X, Image, MousePointer, Info, Zap, Loader2, Settings, Crosshair } from 'lucide-react';
 import { Card, Rank, Suit } from '../types';
 import { RANKS, SUITS, SUIT_SYMBOLS } from '../utils/cards';
+
+// Detect suit from RGB color
+const detectSuitFromColor = (r: number, g: number, b: number): Suit | null => {
+  // Calculate color properties
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const brightness = (r + g + b) / 3;
+
+  // Very dark = spades (black)
+  if (brightness < 60) {
+    return 's';
+  }
+
+  // Check for dominant color channels
+  const redDominance = r - Math.max(g, b);
+  const greenDominance = g - Math.max(r, b);
+  const blueDominance = b - Math.max(r, g);
+
+  // Red is clearly dominant = hearts
+  if (redDominance > 30 && r > 100) {
+    return 'h';
+  }
+
+  // Green is clearly dominant = clubs
+  if (greenDominance > 20 && g > 80) {
+    return 'c';
+  }
+
+  // Blue/cyan is dominant = diamonds
+  if (blueDominance > 20 && b > 100) {
+    return 'd';
+  }
+
+  // Check for cyan (blue + green, low red) = diamonds
+  if (b > 100 && g > 80 && r < 100) {
+    return 'd';
+  }
+
+  // Greenish-blue could be clubs or diamonds, check hue
+  if (g > r && b > r) {
+    // More blue than green = diamonds
+    if (b > g) return 'd';
+    // More green than blue = clubs
+    return 'c';
+  }
+
+  // Fallback: dark colors are spades
+  if (brightness < 100) {
+    return 's';
+  }
+
+  return null;
+};
 
 interface DetectionResult {
   playerCards: Card[][];
@@ -77,6 +130,14 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
     board: Card[];
   }>({ hero: [], villain: [], board: [] });
 
+  // Pixel picking state
+  const [pixelPickMode, setPixelPickMode] = useState<SelectionMode>(null);
+  const [detectedSuit, setDetectedSuit] = useState<Suit | null>(null);
+  const [showRankPicker, setShowRankPicker] = useState(false);
+  const [lastPickedColor, setLastPickedColor] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+
   const handleFile = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return;
 
@@ -117,10 +178,95 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
     setDetectionError(null);
   };
 
-  const handleImageClick = () => {
+  const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
     if (selectionMode) {
       setShowCardPicker(true);
+      return;
     }
+
+    // Pixel picking mode
+    if (pixelPickMode && preview) {
+      const img = e.currentTarget;
+      const rect = img.getBoundingClientRect();
+
+      // Get click position relative to image
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      // Scale to actual image dimensions
+      const scaleX = img.naturalWidth / rect.width;
+      const scaleY = img.naturalHeight / rect.height;
+      const actualX = Math.floor(x * scaleX);
+      const actualY = Math.floor(y * scaleY);
+
+      // Create canvas to read pixel
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const tempImg = new window.Image();
+      tempImg.onload = () => {
+        canvas.width = tempImg.naturalWidth;
+        canvas.height = tempImg.naturalHeight;
+        ctx.drawImage(tempImg, 0, 0);
+
+        // Get pixel color (sample a small area for better accuracy)
+        const imageData = ctx.getImageData(actualX - 2, actualY - 2, 5, 5);
+        const data = imageData.data;
+
+        // Average the colors in the sample area
+        let totalR = 0, totalG = 0, totalB = 0, count = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          totalR += data[i];
+          totalG += data[i + 1];
+          totalB += data[i + 2];
+          count++;
+        }
+        const r = Math.round(totalR / count);
+        const g = Math.round(totalG / count);
+        const b = Math.round(totalB / count);
+
+        setLastPickedColor(`rgb(${r}, ${g}, ${b})`);
+
+        const suit = detectSuitFromColor(r, g, b);
+        if (suit) {
+          setDetectedSuit(suit);
+          setShowRankPicker(true);
+        }
+      };
+      tempImg.src = preview;
+    }
+  };
+
+  // Handle rank selection after pixel-detected suit
+  const handleRankPick = (rank: Rank) => {
+    if (!pixelPickMode || !detectedSuit) return;
+
+    const card: Card = { rank, suit: detectedSuit };
+    const newCollectedCards = { ...collectedCards };
+
+    if (pixelPickMode === 'hero' && collectedCards.hero.length < 4) {
+      newCollectedCards.hero = [...collectedCards.hero, card];
+    } else if (pixelPickMode === 'villain' && collectedCards.villain.length < 4) {
+      newCollectedCards.villain = [...collectedCards.villain, card];
+    } else if (pixelPickMode === 'board' && collectedCards.board.length < 5) {
+      newCollectedCards.board = [...collectedCards.board, card];
+    }
+
+    setCollectedCards(newCollectedCards);
+    setShowRankPicker(false);
+    setDetectedSuit(null);
+
+    // Send to parent
+    const playerCards: Card[][] = [newCollectedCards.hero];
+    if (newCollectedCards.villain.length > 0) {
+      playerCards.push(newCollectedCards.villain);
+    }
+
+    onCardsDetected?.({
+      playerCards,
+      boardCards: newCollectedCards.board,
+    });
   };
 
   const handleCardPick = (card: Card) => {
@@ -266,16 +412,15 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
           {preview ? (
             <div className="space-y-3">
               {/* Screenshot with click overlay */}
-              <div
-                className={`relative cursor-${selectionMode ? 'crosshair' : 'default'}`}
-                onClick={handleImageClick}
-              >
+              <div className="relative">
                 <img
+                  ref={imageRef}
                   src={preview}
                   alt="Screenshot"
+                  onClick={handleImageClick}
                   className={`w-full rounded-lg max-h-64 object-contain bg-gray-900 ${
-                    selectionMode ? 'ring-2 ring-blue-500' : ''
-                  }`}
+                    selectionMode ? 'ring-2 ring-blue-500 cursor-pointer' : ''
+                  } ${pixelPickMode ? 'ring-2 ring-green-500 cursor-crosshair' : ''}`}
                 />
                 <button
                   onClick={(e) => {
@@ -287,9 +432,16 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                   <X size={16} />
                 </button>
                 {selectionMode && (
-                  <div className="absolute inset-0 bg-blue-500/10 rounded-lg flex items-center justify-center">
+                  <div className="absolute inset-0 bg-blue-500/10 rounded-lg flex items-center justify-center pointer-events-none">
                     <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm">
                       Click to add {selectionMode} card
+                    </span>
+                  </div>
+                )}
+                {pixelPickMode && (
+                  <div className="absolute inset-0 bg-green-500/10 rounded-lg flex items-center justify-center pointer-events-none">
+                    <span className="bg-green-600 text-white px-3 py-1 rounded-full text-sm">
+                      Click on {pixelPickMode} card's suit symbol
                     </span>
                   </div>
                 )}
@@ -408,12 +560,77 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                 </div>
               )}
 
-              {/* Manual selection mode buttons */}
+              {/* Pixel Color Picker - Click on screenshot to detect suit */}
               <div className="border-t border-gray-700 pt-3">
-                <div className="text-gray-400 text-xs mb-2">Or manually select cards:</div>
+                <div className="text-green-400 text-xs mb-2 flex items-center gap-1">
+                  <Crosshair size={12} />
+                  Click-to-detect: Click on card's suit symbol to read color
+                </div>
                 <div className="flex gap-2 flex-wrap">
                   <button
-                    onClick={() => setSelectionMode(selectionMode === 'hero' ? null : 'hero')}
+                    onClick={() => {
+                      setPixelPickMode(pixelPickMode === 'hero' ? null : 'hero');
+                      setSelectionMode(null);
+                    }}
+                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                      pixelPickMode === 'hero'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    <Crosshair size={14} className="inline mr-1" />
+                    Hero {getCardCount('hero')}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPixelPickMode(pixelPickMode === 'villain' ? null : 'villain');
+                      setSelectionMode(null);
+                    }}
+                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                      pixelPickMode === 'villain'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    <Crosshair size={14} className="inline mr-1" />
+                    Villain {getCardCount('villain')}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPixelPickMode(pixelPickMode === 'board' ? null : 'board');
+                      setSelectionMode(null);
+                    }}
+                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                      pixelPickMode === 'board'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    <Crosshair size={14} className="inline mr-1" />
+                    Board {getCardCount('board')}
+                  </button>
+                </div>
+                {lastPickedColor && (
+                  <div className="mt-2 text-xs text-gray-400 flex items-center gap-2">
+                    Last color:
+                    <span
+                      className="inline-block w-4 h-4 rounded border border-gray-500"
+                      style={{ backgroundColor: lastPickedColor }}
+                    />
+                    <span className="font-mono">{lastPickedColor}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Manual selection mode buttons */}
+              <div className="border-t border-gray-700 pt-3">
+                <div className="text-gray-400 text-xs mb-2">Or pick cards manually:</div>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => {
+                      setSelectionMode(selectionMode === 'hero' ? null : 'hero');
+                      setPixelPickMode(null);
+                    }}
                     className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
                       selectionMode === 'hero'
                         ? 'bg-blue-600 text-white'
@@ -424,7 +641,10 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                     Hero {getCardCount('hero')}
                   </button>
                   <button
-                    onClick={() => setSelectionMode(selectionMode === 'villain' ? null : 'villain')}
+                    onClick={() => {
+                      setSelectionMode(selectionMode === 'villain' ? null : 'villain');
+                      setPixelPickMode(null);
+                    }}
                     className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
                       selectionMode === 'villain'
                         ? 'bg-red-600 text-white'
@@ -435,7 +655,10 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                     Villain {getCardCount('villain')}
                   </button>
                   <button
-                    onClick={() => setSelectionMode(selectionMode === 'board' ? null : 'board')}
+                    onClick={() => {
+                      setSelectionMode(selectionMode === 'board' ? null : 'board');
+                      setPixelPickMode(null);
+                    }}
                     className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
                       selectionMode === 'board'
                         ? 'bg-yellow-600 text-white'
@@ -452,7 +675,7 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
               <div className="flex items-start gap-2 text-xs text-gray-400 bg-gray-800/50 p-2 rounded">
                 <Info size={14} className="mt-0.5 flex-shrink-0" />
                 <span>
-                  Click "Auto-Detect" to identify cards with AI, or manually click Hero/Villain/Board then click on screenshot to pick cards.
+                  <strong>Click-to-detect:</strong> Click on suit symbols in the screenshot - the browser reads the actual pixel color to detect the suit. Then pick the rank.
                 </span>
               </div>
             </div>
@@ -583,6 +806,57 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rank Picker Modal (after pixel color detection) */}
+      {showRankPicker && detectedSuit && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-xl p-4 max-w-sm w-full">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-white font-medium flex items-center gap-2">
+                Detected: <span className={`text-2xl ${getSuitColor(detectedSuit)}`}>{SUIT_SYMBOLS[detectedSuit]}</span>
+                <span className="text-sm text-gray-400">
+                  ({detectedSuit === 'd' ? 'diamonds' : detectedSuit === 'c' ? 'clubs' : detectedSuit === 'h' ? 'hearts' : 'spades'})
+                </span>
+              </h3>
+              <button
+                onClick={() => {
+                  setShowRankPicker(false);
+                  setDetectedSuit(null);
+                }}
+                className="text-gray-400 hover:text-white"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="mb-3 text-gray-300 text-sm">Select the rank:</div>
+
+            <div className="flex flex-wrap gap-2">
+              {RANKS.map((rank) => {
+                const isUsed = isCardUsed(rank, detectedSuit);
+                return (
+                  <button
+                    key={rank}
+                    onClick={() => !isUsed && handleRankPick(rank)}
+                    disabled={isUsed}
+                    className={`w-12 h-14 rounded-lg text-lg font-bold transition-colors ${
+                      isUsed
+                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                        : `bg-white hover:bg-gray-100 ${getSuitColor(detectedSuit)}`
+                    }`}
+                  >
+                    {rank === 'T' ? '10' : rank}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 text-xs text-gray-500">
+              Wrong suit? Click elsewhere on the screenshot to try again.
             </div>
           </div>
         </div>
