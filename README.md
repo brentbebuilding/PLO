@@ -76,3 +76,4 @@ The calculator uses Monte Carlo simulation to estimate equity:
 ## License
 
 MIT
+
