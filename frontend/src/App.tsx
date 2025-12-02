@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card as CardType } from './types';
+import { Card as CardType, Rank, Suit } from './types';
 import {
   PlayerHand,
   Board,
@@ -8,7 +8,7 @@ import {
   ScreenshotReference,
 } from './components';
 import { calculateEquity, SimulationResult } from './utils/equity';
-import { Plus, Minus, RefreshCw, Trash2, Github } from 'lucide-react';
+import { Plus, Minus, RefreshCw, Trash2, Github, Type } from 'lucide-react';
 
 type Stage = 'preflop' | 'flop' | 'turn' | 'river';
 
@@ -51,6 +51,80 @@ function App() {
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [quickInput, setQuickInput] = useState({ hero: '', villain: '', board: '' });
+  const [showQuickInput, setShowQuickInput] = useState(false);
+
+  // Parse card string like "Ad Qc Jc 7s" into Card objects
+  const parseCardString = (input: string): CardType[] => {
+    const cards: CardType[] = [];
+    const validRanks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+    const validSuits = ['d', 'c', 'h', 's'];
+
+    // Remove extra spaces and split
+    const tokens = input.trim().toUpperCase().split(/\s+/);
+
+    for (const token of tokens) {
+      if (token.length >= 2) {
+        let rank = token[0];
+        let suit = token[1].toLowerCase();
+
+        // Handle "10" as "T"
+        if (token.startsWith('10')) {
+          rank = 'T';
+          suit = token[2]?.toLowerCase() || '';
+        }
+
+        if (validRanks.includes(rank) && validSuits.includes(suit)) {
+          cards.push({ rank: rank as Rank, suit: suit as Suit });
+        }
+      }
+    }
+
+    return cards;
+  };
+
+  // Apply quick input cards
+  const applyQuickInput = () => {
+    const heroCards = parseCardString(quickInput.hero);
+    const villainCards = parseCardString(quickInput.villain);
+    const boardCardsInput = parseCardString(quickInput.board);
+
+    // Update hero cards
+    if (heroCards.length > 0) {
+      const newPlayerCards = [...playerCards];
+      heroCards.forEach((card, idx) => {
+        if (idx < 4) {
+          newPlayerCards[0][idx] = card;
+        }
+      });
+      setPlayerCards(newPlayerCards);
+    }
+
+    // Update villain cards
+    if (villainCards.length > 0 && numPlayers >= 2) {
+      const newPlayerCards = [...playerCards];
+      villainCards.forEach((card, idx) => {
+        if (idx < 4) {
+          newPlayerCards[1][idx] = card;
+        }
+      });
+      setPlayerCards(newPlayerCards);
+    }
+
+    // Update board cards
+    if (boardCardsInput.length > 0) {
+      const newBoardCards = [...boardCards];
+      boardCardsInput.forEach((card, idx) => {
+        if (idx < 5) {
+          newBoardCards[idx] = card;
+        }
+      });
+      setBoardCards(newBoardCards);
+    }
+
+    // Clear inputs after applying
+    setQuickInput({ hero: '', villain: '', board: '' });
+  };
 
   // Get all used cards
   const usedCards: (CardType | null)[] = [
@@ -230,6 +304,68 @@ function App() {
               numPlayers={numPlayers}
               onCardsDetected={handleCardsDetected}
             />
+
+            {/* Quick Text Input */}
+            <div className="bg-gray-800/50 rounded-xl p-4">
+              <button
+                onClick={() => setShowQuickInput(!showQuickInput)}
+                className="flex items-center gap-2 text-white font-medium w-full"
+              >
+                <Type size={18} />
+                Quick Card Entry
+                <span className="text-gray-400 text-sm ml-2">
+                  {showQuickInput ? '(click to hide)' : '(type cards like "Ad Qc Jc 7s")'}
+                </span>
+              </button>
+
+              {showQuickInput && (
+                <div className="mt-4 space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-gray-400 text-sm mb-1">Hero (4 cards)</label>
+                      <input
+                        type="text"
+                        value={quickInput.hero}
+                        onChange={(e) => setQuickInput({ ...quickInput, hero: e.target.value })}
+                        placeholder="Ad Qc Jc 7s"
+                        className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-gray-400 text-sm mb-1">Villain (4 cards)</label>
+                      <input
+                        type="text"
+                        value={quickInput.villain}
+                        onChange={(e) => setQuickInput({ ...quickInput, villain: e.target.value })}
+                        placeholder="As Ks Ts 9c"
+                        className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-gray-400 text-sm mb-1">Board (0-5 cards)</label>
+                      <input
+                        type="text"
+                        value={quickInput.board}
+                        onChange={(e) => setQuickInput({ ...quickInput, board: e.target.value })}
+                        placeholder="6s 7s 6c 3d Qs"
+                        className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <p className="text-gray-500 text-xs">
+                      Format: Rank + Suit (A=Ace, K=King, Q=Queen, J=Jack, T=10, d=♦, c=♣, h=♥, s=♠)
+                    </p>
+                    <button
+                      onClick={applyQuickInput}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium"
+                    >
+                      Apply Cards
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Player controls */}
             <div className="flex items-center justify-between">
