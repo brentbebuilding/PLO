@@ -1,11 +1,12 @@
 /**
- * Cloudflare Worker for PLO Card Detection using Claude Vision API
+ * Cloudflare Worker for PLO Card Detection using Google Gemini Vision API
  *
  * Analyzes poker screenshots and returns detected cards.
+ * Uses Gemini 1.5 Flash which has a FREE tier (1,500 requests/day)
  */
 
 interface Env {
-  ANTHROPIC_API_KEY: string;
+  GEMINI_API_KEY: string;
 }
 
 interface CardDetectionRequest {
@@ -49,8 +50,8 @@ export default {
         });
       }
 
-      // Call Claude Vision API
-      const cards = await detectCardsWithClaude(body.image, env.ANTHROPIC_API_KEY);
+      // Call Gemini Vision API
+      const cards = await detectCardsWithGemini(body.image, env.GEMINI_API_KEY);
 
       return new Response(JSON.stringify(cards), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -67,43 +68,19 @@ export default {
   },
 };
 
-async function detectCardsWithClaude(base64Image: string, apiKey: string): Promise<DetectedCards> {
+async function detectCardsWithGemini(base64Image: string, apiKey: string): Promise<DetectedCards> {
   // Remove data URL prefix if present
   const imageData = base64Image.replace(/^data:image\/\w+;base64,/, '');
 
-  // Determine media type
-  let mediaType = 'image/png';
+  // Determine mime type
+  let mimeType = 'image/png';
   if (base64Image.startsWith('data:image/jpeg')) {
-    mediaType = 'image/jpeg';
+    mimeType = 'image/jpeg';
   } else if (base64Image.startsWith('data:image/webp')) {
-    mediaType = 'image/webp';
+    mimeType = 'image/webp';
   }
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: mediaType,
-                data: imageData,
-              },
-            },
-            {
-              type: 'text',
-              text: `Analyze this ClubWPT Gold poker screenshot and identify all visible cards.
+  const prompt = `Analyze this ClubWPT Gold poker screenshot and identify all visible cards.
 
 ClubWPT Gold uses these colors for suits:
 - BLUE = Diamonds (d)
@@ -111,7 +88,7 @@ ClubWPT Gold uses these colors for suits:
 - RED = Hearts (h)
 - BLACK = Spades (s)
 
-Return ONLY a JSON object in this exact format (no other text):
+Return ONLY a JSON object in this exact format (no other text, no markdown):
 {
   "hero": "Ad Qc Jc 7s",
   "villain": "As Ks Ts 9c",
@@ -126,33 +103,62 @@ Rules:
 - Villain is the other active player (not folded)
 - Board is the community cards in the center
 - Leave empty string "" if cards not visible
-- Only include players who have visible cards (not folded)`,
-            },
-          ],
+- Only include players who have visible cards (not folded)`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: mimeType,
+                  data: imageData,
+                },
+              },
+              {
+                text: prompt,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 1024,
         },
-      ],
-    }),
-  });
+      }),
+    }
+  );
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Claude API error: ${error}`);
+    throw new Error(`Gemini API error: ${error}`);
   }
 
   const result = await response.json() as {
-    content: Array<{ type: string; text?: string }>;
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ text?: string }>;
+      };
+    }>;
   };
 
   // Extract the text response
-  const textContent = result.content.find(c => c.type === 'text');
-  if (!textContent || !textContent.text) {
-    throw new Error('No response from Claude');
+  const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error('No response from Gemini');
   }
 
-  // Parse the JSON from Claude's response
+  // Parse the JSON from Gemini's response
   try {
-    // Try to extract JSON from the response (Claude might add extra text)
-    const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
+    // Try to extract JSON from the response (might have markdown code blocks)
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]) as DetectedCards;
     }
@@ -163,7 +169,7 @@ Rules:
       hero: '',
       villain: '',
       board: '',
-      analysis: textContent.text,
+      analysis: text,
     };
   }
 }
