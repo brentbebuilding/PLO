@@ -43,8 +43,10 @@ const parseCardString = (input: string): Card[] => {
 };
 
 // Get API URL from localStorage or use default
+const DEFAULT_API_URL = 'https://plo-vision.brentloies.workers.dev';
+
 const getApiUrl = (): string => {
-  return localStorage.getItem('plo_vision_api_url') || '';
+  return localStorage.getItem('plo_vision_api_url') || DEFAULT_API_URL;
 };
 
 const setApiUrl = (url: string): void => {
