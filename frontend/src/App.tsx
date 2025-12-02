@@ -5,7 +5,6 @@ import {
   Board,
   CardSelector,
   EquityDisplay,
-  ScreenshotReference,
 } from './components';
 import { calculateEquity, SimulationResult } from './utils/equity';
 import { Plus, Minus, RefreshCw, Trash2, Github } from 'lucide-react';
@@ -200,9 +199,6 @@ function App() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left column - Players and Board */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Screenshot Reference */}
-            <ScreenshotReference />
-
             {/* Player controls */}
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-medium text-white">
@@ -313,7 +309,6 @@ function App() {
             <div className="bg-gray-800/30 rounded-xl p-6">
               <h3 className="text-white font-medium mb-3">How to use</h3>
               <ol className="text-gray-400 text-sm space-y-2 list-decimal list-inside">
-                <li>Upload a screenshot as reference (optional)</li>
                 <li>Click on card slots to select cards for each player</li>
                 <li>Each player needs 4 hole cards (PLO)</li>
                 <li>Add community cards for flop/turn/river</li>
