@@ -327,22 +327,84 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                 </div>
               )}
 
-              {/* Detection result */}
+              {/* Detection result with edit capability */}
               {detectionResult && (
-                <div className="bg-green-900/30 rounded p-2 text-sm space-y-1">
-                  <div className="text-green-400 font-medium">Detected:</div>
+                <div className="bg-green-900/30 rounded p-2 text-sm space-y-2">
+                  <div className="text-green-400 font-medium">Detected (click card to fix):</div>
                   {detectionResult.hero && (
-                    <div className="text-gray-300">Hero: <span className="text-white font-mono">{detectionResult.hero}</span></div>
+                    <div className="text-gray-300 flex items-center gap-2 flex-wrap">
+                      <span>Hero:</span>
+                      {collectedCards.hero.map((card, idx) => (
+                        <button
+                          key={`hero-${idx}`}
+                          onClick={() => {
+                            setSelectionMode('hero');
+                            setShowCardPicker(true);
+                            // Remove this card so user can replace it
+                            setCollectedCards(prev => ({
+                              ...prev,
+                              hero: prev.hero.filter((_, i) => i !== idx)
+                            }));
+                          }}
+                          className={`px-2 py-1 rounded font-mono text-sm ${
+                            card.suit === 'h' || card.suit === 'd' ? 'bg-red-900 text-red-200' : 'bg-gray-700 text-white'
+                          } hover:ring-2 hover:ring-yellow-400`}
+                        >
+                          {card.rank}{card.suit}
+                        </button>
+                      ))}
+                    </div>
                   )}
                   {detectionResult.villain && (
-                    <div className="text-gray-300">Villain: <span className="text-white font-mono">{detectionResult.villain}</span></div>
+                    <div className="text-gray-300 flex items-center gap-2 flex-wrap">
+                      <span>Villain:</span>
+                      {collectedCards.villain.map((card, idx) => (
+                        <button
+                          key={`villain-${idx}`}
+                          onClick={() => {
+                            setSelectionMode('villain');
+                            setShowCardPicker(true);
+                            setCollectedCards(prev => ({
+                              ...prev,
+                              villain: prev.villain.filter((_, i) => i !== idx)
+                            }));
+                          }}
+                          className={`px-2 py-1 rounded font-mono text-sm ${
+                            card.suit === 'h' || card.suit === 'd' ? 'bg-red-900 text-red-200' : 'bg-gray-700 text-white'
+                          } hover:ring-2 hover:ring-yellow-400`}
+                        >
+                          {card.rank}{card.suit}
+                        </button>
+                      ))}
+                    </div>
                   )}
                   {detectionResult.board && (
-                    <div className="text-gray-300">Board: <span className="text-white font-mono">{detectionResult.board}</span></div>
+                    <div className="text-gray-300 flex items-center gap-2 flex-wrap">
+                      <span>Board:</span>
+                      {collectedCards.board.map((card, idx) => (
+                        <button
+                          key={`board-${idx}`}
+                          onClick={() => {
+                            setSelectionMode('board');
+                            setShowCardPicker(true);
+                            setCollectedCards(prev => ({
+                              ...prev,
+                              board: prev.board.filter((_, i) => i !== idx)
+                            }));
+                          }}
+                          className={`px-2 py-1 rounded font-mono text-sm ${
+                            card.suit === 'h' || card.suit === 'd' ? 'bg-red-900 text-red-200' : 'bg-gray-700 text-white'
+                          } hover:ring-2 hover:ring-yellow-400`}
+                        >
+                          {card.rank}{card.suit}
+                        </button>
+                      ))}
+                    </div>
                   )}
                   {detectionResult.analysis && (
-                    <div className="text-gray-400 text-xs mt-2">{detectionResult.analysis}</div>
+                    <div className="text-gray-400 text-xs mt-1">{detectionResult.analysis}</div>
                   )}
+                  <div className="text-yellow-400 text-xs">Click any card above to replace it</div>
                 </div>
               )}
 
