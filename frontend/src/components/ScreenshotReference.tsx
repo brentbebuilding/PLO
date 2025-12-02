@@ -1,15 +1,26 @@
-import React, { useCallback, useState } from 'react';
-import { Upload, X, Image } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { Upload, X, Image, Scan, Loader } from 'lucide-react';
+import { Card } from '../types';
+import { detectCardsFromImage } from '../utils/cardDetection';
+
+interface DetectionResult {
+  playerCards: Card[][];
+  boardCards: Card[];
+}
 
 interface ScreenshotReferenceProps {
-  onImageLoad?: (imageData: string) => void;
+  onCardsDetected?: (result: DetectionResult) => void;
+  numPlayers?: number;
 }
 
 export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
-  onImageLoad,
+  onCardsDetected,
+  numPlayers = 2,
 }) => {
   const [preview, setPreview] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(true);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [detectionMessage, setDetectionMessage] = useState<string | null>(null);
 
   const handleFile = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return;
@@ -18,10 +29,39 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
     reader.onload = (e) => {
       const imageData = e.target?.result as string;
       setPreview(imageData);
-      onImageLoad?.(imageData);
+      setDetectionMessage(null);
+      // Auto-detect when image is loaded
+      runDetection(imageData);
     };
     reader.readAsDataURL(file);
-  }, [onImageLoad]);
+  }, [numPlayers]);
+
+  const runDetection = async (imageData: string) => {
+    setIsDetecting(true);
+    setDetectionMessage('Analyzing screenshot...');
+
+    try {
+      const result = await detectCardsFromImage(imageData, numPlayers);
+
+      if (result.success) {
+        setDetectionMessage(result.message || 'Detection complete');
+
+        // Convert detected cards to the format expected by parent
+        const playerCards: Card[][] = result.playerCards.map(hand =>
+          hand.map(dc => dc.card)
+        );
+        const boardCards: Card[] = result.boardCards.map(dc => dc.card);
+
+        onCardsDetected?.({ playerCards, boardCards });
+      } else {
+        setDetectionMessage(result.message || 'No cards detected');
+      }
+    } catch (error) {
+      setDetectionMessage('Detection failed. Try a clearer screenshot.');
+    } finally {
+      setIsDetecting(false);
+    }
+  };
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -43,6 +83,13 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
 
   const clearPreview = () => {
     setPreview(null);
+    setDetectionMessage(null);
+  };
+
+  const handleRetryDetection = () => {
+    if (preview) {
+      runDetection(preview);
+    }
   };
 
   return (
@@ -53,7 +100,7 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
       >
         <h3 className="text-white font-medium flex items-center gap-2">
           <Image size={18} />
-          Screenshot Reference
+          Screenshot Detection
         </h3>
         <span className="text-gray-400 text-sm">
           {isExpanded ? '(click to collapse)' : '(click to expand)'}
@@ -66,17 +113,42 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
             <div className="relative">
               <img
                 src={preview}
-                alt="Screenshot reference"
-                className="w-full rounded-lg max-h-48 object-contain bg-gray-900"
+                alt="Screenshot"
+                className="w-full rounded-lg max-h-64 object-contain bg-gray-900"
               />
               <button
-                onClick={clearPreview}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  clearPreview();
+                }}
                 className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
               >
                 <X size={16} />
               </button>
-              <p className="text-xs text-gray-400 mt-2 text-center">
-                Use this as a reference while selecting cards below
+
+              {/* Detection status */}
+              <div className="mt-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {isDetecting ? (
+                    <Loader className="animate-spin text-blue-400" size={16} />
+                  ) : (
+                    <Scan className="text-green-400" size={16} />
+                  )}
+                  <span className="text-sm text-gray-300">
+                    {detectionMessage || 'Ready to detect'}
+                  </span>
+                </div>
+                <button
+                  onClick={handleRetryDetection}
+                  disabled={isDetecting}
+                  className="text-sm px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded transition-colors"
+                >
+                  {isDetecting ? 'Detecting...' : 'Re-detect'}
+                </button>
+              </div>
+
+              <p className="text-xs text-gray-500 mt-2">
+                Cards will auto-fill below. Adjust any incorrect detections manually.
               </p>
             </div>
           ) : (
@@ -90,10 +162,10 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
             >
               <Upload className="mx-auto text-gray-400 mb-2" size={24} />
               <p className="text-gray-300 text-sm">
-                Drop screenshot, paste from clipboard, or click to upload
+                Drop screenshot, paste (Ctrl+V), or click to upload
               </p>
               <p className="text-gray-500 text-xs mt-1">
-                Use as visual reference while selecting cards
+                Cards will be auto-detected from your poker screenshot
               </p>
               <input
                 id="screenshot-input"

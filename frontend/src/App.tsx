@@ -171,6 +171,31 @@ function App() {
     setError(null);
   };
 
+  // Handle cards detected from screenshot
+  const handleCardsDetected = (result: { playerCards: CardType[][]; boardCards: CardType[] }) => {
+    // Update player cards with detected cards
+    const newPlayerCards = [...playerCards];
+    result.playerCards.forEach((hand, playerIdx) => {
+      if (playerIdx < numPlayers) {
+        hand.forEach((card, cardIdx) => {
+          if (cardIdx < 4) {
+            newPlayerCards[playerIdx][cardIdx] = card;
+          }
+        });
+      }
+    });
+    setPlayerCards(newPlayerCards);
+
+    // Update board cards with detected cards
+    const newBoardCards = [...boardCards];
+    result.boardCards.forEach((card, idx) => {
+      if (idx < 5) {
+        newBoardCards[idx] = card;
+      }
+    });
+    setBoardCards(newBoardCards);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-poker-felt to-gray-900">
       {/* Header */}
@@ -201,7 +226,10 @@ function App() {
           {/* Left column - Players and Board */}
           <div className="lg:col-span-2 space-y-6">
             {/* Screenshot Reference */}
-            <ScreenshotReference />
+            <ScreenshotReference
+              numPlayers={numPlayers}
+              onCardsDetected={handleCardsDetected}
+            />
 
             {/* Player controls */}
             <div className="flex items-center justify-between">
