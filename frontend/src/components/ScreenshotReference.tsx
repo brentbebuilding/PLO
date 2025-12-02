@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Upload, X, Image, MousePointer, Info } from 'lucide-react';
+import { Upload, X, Image, MousePointer, Info, Zap, Loader2, Settings } from 'lucide-react';
 import { Card, Rank, Suit } from '../types';
 import { RANKS, SUITS, SUIT_SYMBOLS } from '../utils/cards';
 
@@ -15,6 +15,42 @@ interface ScreenshotReferenceProps {
 
 type SelectionMode = 'hero' | 'villain' | 'board' | null;
 
+// Parse card string like "Ad Qc Jc 7s" into Card objects
+const parseCardString = (input: string): Card[] => {
+  const cards: Card[] = [];
+  const validRanks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+  const validSuits = ['d', 'c', 'h', 's'];
+
+  const tokens = input.trim().toUpperCase().split(/\s+/);
+
+  for (const token of tokens) {
+    if (token.length >= 2) {
+      let rank = token[0];
+      let suit = token[1].toLowerCase();
+
+      if (token.startsWith('10')) {
+        rank = 'T';
+        suit = token[2]?.toLowerCase() || '';
+      }
+
+      if (validRanks.includes(rank) && validSuits.includes(suit)) {
+        cards.push({ rank: rank as Rank, suit: suit as Suit });
+      }
+    }
+  }
+
+  return cards;
+};
+
+// Get API URL from localStorage or use default
+const getApiUrl = (): string => {
+  return localStorage.getItem('plo_vision_api_url') || '';
+};
+
+const setApiUrl = (url: string): void => {
+  localStorage.setItem('plo_vision_api_url', url);
+};
+
 export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
   onCardsDetected,
   numPlayers: _numPlayers = 2,
@@ -23,6 +59,16 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
   const [isExpanded, setIsExpanded] = useState(true);
   const [selectionMode, setSelectionMode] = useState<SelectionMode>(null);
   const [showCardPicker, setShowCardPicker] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiUrl, setApiUrlState] = useState(getApiUrl());
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [detectionError, setDetectionError] = useState<string | null>(null);
+  const [detectionResult, setDetectionResult] = useState<{
+    hero: string;
+    villain: string;
+    board: string;
+    analysis?: string;
+  } | null>(null);
   const [collectedCards, setCollectedCards] = useState<{
     hero: Card[];
     villain: Card[];
@@ -37,6 +83,8 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
       const imageData = e.target?.result as string;
       setPreview(imageData);
       setCollectedCards({ hero: [], villain: [], board: [] });
+      setDetectionResult(null);
+      setDetectionError(null);
     };
     reader.readAsDataURL(file);
   }, []);
@@ -63,6 +111,8 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
     setPreview(null);
     setCollectedCards({ hero: [], villain: [], board: [] });
     setSelectionMode(null);
+    setDetectionResult(null);
+    setDetectionError(null);
   };
 
   const handleImageClick = () => {
@@ -99,6 +149,72 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
     });
   };
 
+  // Auto-detect cards using Claude Vision API
+  const handleAutoDetect = async () => {
+    if (!preview || !apiUrl) {
+      if (!apiUrl) {
+        setShowSettings(true);
+        setDetectionError('Please configure the Vision API URL first');
+      }
+      return;
+    }
+
+    setIsDetecting(true);
+    setDetectionError(null);
+
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ image: preview }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Detection failed');
+      }
+
+      const result = await response.json();
+      setDetectionResult(result);
+
+      // Parse and apply the detected cards
+      const heroCards = parseCardString(result.hero || '');
+      const villainCards = parseCardString(result.villain || '');
+      const boardCardsDetected = parseCardString(result.board || '');
+
+      // Update collected cards state
+      setCollectedCards({
+        hero: heroCards,
+        villain: villainCards,
+        board: boardCardsDetected,
+      });
+
+      // Send to parent
+      const playerCards: Card[][] = [heroCards];
+      if (villainCards.length > 0) {
+        playerCards.push(villainCards);
+      }
+
+      onCardsDetected?.({
+        playerCards,
+        boardCards: boardCardsDetected,
+      });
+
+    } catch (error) {
+      setDetectionError(error instanceof Error ? error.message : 'Detection failed');
+    } finally {
+      setIsDetecting(false);
+    }
+  };
+
+  const handleSaveApiUrl = (url: string) => {
+    setApiUrl(url);
+    setApiUrlState(url);
+    setShowSettings(false);
+  };
+
   const isCardUsed = (rank: Rank, suit: Suit): boolean => {
     const allCards = [...collectedCards.hero, ...collectedCards.villain, ...collectedCards.board];
     return allCards.some(c => c.rank === rank && c.suit === suit);
@@ -124,10 +240,23 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
         <h3 className="text-white font-medium flex items-center gap-2">
           <Image size={18} />
           Screenshot Helper
+          {apiUrl && <span className="text-green-400 text-xs">(AI enabled)</span>}
         </h3>
-        <span className="text-gray-400 text-sm">
-          {isExpanded ? '(collapse)' : '(expand)'}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowSettings(true);
+            }}
+            className="text-gray-400 hover:text-white p-1"
+            title="Settings"
+          >
+            <Settings size={16} />
+          </button>
+          <span className="text-gray-400 text-sm">
+            {isExpanded ? '(collapse)' : '(expand)'}
+          </span>
+        </div>
       </div>
 
       {isExpanded && (
@@ -164,67 +293,104 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                 )}
               </div>
 
-              {/* Selection mode buttons */}
-              <div className="flex gap-2 flex-wrap">
-                <button
-                  onClick={() => setSelectionMode(selectionMode === 'hero' ? null : 'hero')}
-                  className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                    selectionMode === 'hero'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  <MousePointer size={14} className="inline mr-1" />
-                  Hero {getCardCount('hero')}
-                </button>
-                <button
-                  onClick={() => setSelectionMode(selectionMode === 'villain' ? null : 'villain')}
-                  className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                    selectionMode === 'villain'
-                      ? 'bg-red-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  <MousePointer size={14} className="inline mr-1" />
-                  Villain {getCardCount('villain')}
-                </button>
-                <button
-                  onClick={() => setSelectionMode(selectionMode === 'board' ? null : 'board')}
-                  className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                    selectionMode === 'board'
-                      ? 'bg-yellow-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  <MousePointer size={14} className="inline mr-1" />
-                  Board {getCardCount('board')}
-                </button>
+              {/* Auto-detect button */}
+              <button
+                onClick={handleAutoDetect}
+                disabled={isDetecting || !apiUrl}
+                className={`w-full py-2 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors ${
+                  isDetecting
+                    ? 'bg-purple-700 text-white cursor-wait'
+                    : apiUrl
+                    ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                    : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {isDetecting ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    Detecting cards...
+                  </>
+                ) : (
+                  <>
+                    <Zap size={18} />
+                    Auto-Detect Cards (AI)
+                  </>
+                )}
+              </button>
+
+              {/* Detection error */}
+              {detectionError && (
+                <div className="text-red-400 text-sm bg-red-900/30 rounded p-2">
+                  {detectionError}
+                </div>
+              )}
+
+              {/* Detection result */}
+              {detectionResult && (
+                <div className="bg-green-900/30 rounded p-2 text-sm space-y-1">
+                  <div className="text-green-400 font-medium">Detected:</div>
+                  {detectionResult.hero && (
+                    <div className="text-gray-300">Hero: <span className="text-white font-mono">{detectionResult.hero}</span></div>
+                  )}
+                  {detectionResult.villain && (
+                    <div className="text-gray-300">Villain: <span className="text-white font-mono">{detectionResult.villain}</span></div>
+                  )}
+                  {detectionResult.board && (
+                    <div className="text-gray-300">Board: <span className="text-white font-mono">{detectionResult.board}</span></div>
+                  )}
+                  {detectionResult.analysis && (
+                    <div className="text-gray-400 text-xs mt-2">{detectionResult.analysis}</div>
+                  )}
+                </div>
+              )}
+
+              {/* Manual selection mode buttons */}
+              <div className="border-t border-gray-700 pt-3">
+                <div className="text-gray-400 text-xs mb-2">Or manually select cards:</div>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => setSelectionMode(selectionMode === 'hero' ? null : 'hero')}
+                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                      selectionMode === 'hero'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    <MousePointer size={14} className="inline mr-1" />
+                    Hero {getCardCount('hero')}
+                  </button>
+                  <button
+                    onClick={() => setSelectionMode(selectionMode === 'villain' ? null : 'villain')}
+                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                      selectionMode === 'villain'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    <MousePointer size={14} className="inline mr-1" />
+                    Villain {getCardCount('villain')}
+                  </button>
+                  <button
+                    onClick={() => setSelectionMode(selectionMode === 'board' ? null : 'board')}
+                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                      selectionMode === 'board'
+                        ? 'bg-yellow-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    <MousePointer size={14} className="inline mr-1" />
+                    Board {getCardCount('board')}
+                  </button>
+                </div>
               </div>
 
               {/* Instructions */}
               <div className="flex items-start gap-2 text-xs text-gray-400 bg-gray-800/50 p-2 rounded">
                 <Info size={14} className="mt-0.5 flex-shrink-0" />
                 <span>
-                  1. Click Hero/Villain/Board button
-                  2. Click on screenshot
-                  3. Pick the card you see
+                  Click "Auto-Detect" to identify cards with AI, or manually click Hero/Villain/Board then click on screenshot to pick cards.
                 </span>
               </div>
-
-              {/* Show collected cards */}
-              {(collectedCards.hero.length > 0 || collectedCards.villain.length > 0 || collectedCards.board.length > 0) && (
-                <div className="text-xs text-gray-400 space-y-1">
-                  {collectedCards.hero.length > 0 && (
-                    <div>Hero: {collectedCards.hero.map(c => `${c.rank}${c.suit}`).join(' ')}</div>
-                  )}
-                  {collectedCards.villain.length > 0 && (
-                    <div>Villain: {collectedCards.villain.map(c => `${c.rank}${c.suit}`).join(' ')}</div>
-                  )}
-                  {collectedCards.board.length > 0 && (
-                    <div>Board: {collectedCards.board.map(c => `${c.rank}${c.suit}`).join(' ')}</div>
-                  )}
-                </div>
-              )}
             </div>
           ) : (
             <div
@@ -240,7 +406,7 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                 Drop screenshot, paste (Ctrl+V), or click to upload
               </p>
               <p className="text-gray-500 text-xs mt-1">
-                Then click to identify each card
+                {apiUrl ? 'AI will auto-detect cards' : 'Configure Vision API in settings for auto-detection'}
               </p>
               <input
                 id="screenshot-input"
@@ -251,6 +417,62 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
               />
             </div>
           )}
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-xl p-4 max-w-md w-full">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-white font-medium">Vision API Settings</h3>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-gray-400 text-sm mb-1">
+                  Vision API URL
+                </label>
+                <input
+                  type="text"
+                  value={apiUrl}
+                  onChange={(e) => setApiUrlState(e.target.value)}
+                  placeholder="https://your-worker.your-subdomain.workers.dev"
+                  className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="text-gray-400 text-xs space-y-2">
+                <p>To enable AI card detection:</p>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>Deploy the Cloudflare Worker from /worker folder</li>
+                  <li>Set your Anthropic API key as a secret</li>
+                  <li>Paste the worker URL above</li>
+                </ol>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleSaveApiUrl(apiUrl)}
+                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
