@@ -6,8 +6,6 @@ import { RANKS, SUITS, SUIT_SYMBOLS } from '../utils/cards';
 // Detect suit from RGB color
 const detectSuitFromColor = (r: number, g: number, b: number): Suit | null => {
   // Calculate color properties
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
   const brightness = (r + g + b) / 3;
 
   // Very dark = spades (black)
@@ -135,7 +133,6 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
   const [detectedSuit, setDetectedSuit] = useState<Suit | null>(null);
   const [showRankPicker, setShowRankPicker] = useState(false);
   const [lastPickedColor, setLastPickedColor] = useState<string | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
 
   const handleFile = useCallback((file: File) => {
