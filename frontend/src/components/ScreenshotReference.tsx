@@ -1,7 +1,10 @@
 import { useCallback, useState, useRef } from 'react';
-import { Upload, X, Image, MousePointer, Info, Zap, Loader2, Settings, Crosshair } from 'lucide-react';
+import { Upload, X, Image, MousePointer, Info, Zap, Loader2, Settings, Crosshair, Wand2, GraduationCap } from 'lucide-react';
 import { Card, Rank, Suit } from '../types';
 import { RANKS, SUITS, SUIT_SYMBOLS } from '../utils/cards';
+import { detectCards } from '../utils/cardDetection';
+import { CardSlot, GlyphTemplate, loadSlots, loadTemplates } from '../utils/glyphTemplates';
+import CardCalibration from './CardCalibration';
 
 // Detect suit from RGB color
 const detectSuitFromColor = (r: number, g: number, b: number): Suit | null => {
@@ -134,6 +137,12 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
   const [showRankPicker, setShowRankPicker] = useState(false);
   const [lastPickedColor, setLastPickedColor] = useState<string | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+
+  // Offline detection: calibration taught by the user, no API involved.
+  const [showCalibration, setShowCalibration] = useState(false);
+  const [slots, setSlots] = useState<CardSlot[]>(() => loadSlots());
+  const [templates, setTemplates] = useState<GlyphTemplate[]>(() => loadTemplates());
+  const isCalibrated = slots.length > 0 && templates.length > 0;
 
   const handleFile = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return;
@@ -294,6 +303,45 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
     });
   };
 
+  // Read cards from the taught templates. Runs entirely in the browser.
+  const handleOfflineDetect = async () => {
+    if (!preview) return;
+    if (!isCalibrated) {
+      setShowCalibration(true);
+      return;
+    }
+
+    setIsDetecting(true);
+    setDetectionError(null);
+
+    try {
+      const result = await detectCards(preview, slots, templates);
+      const asText = (cards: Card[]) => cards.map(c => `${c.rank}${c.suit}`).join(' ');
+
+      setCollectedCards({ hero: result.hero, villain: result.villain, board: result.board });
+      setDetectionResult({
+        hero: asText(result.hero),
+        villain: asText(result.villain),
+        board: asText(result.board),
+        analysis: result.message,
+      });
+
+      const playerCards: Card[][] = [result.hero];
+      if (result.villain.length > 0) {
+        playerCards.push(result.villain);
+      }
+      onCardsDetected?.({ playerCards, boardCards: result.board });
+
+      if (!result.success) {
+        setDetectionError(result.message ?? 'Could not read any cards');
+      }
+    } catch (error) {
+      setDetectionError(error instanceof Error ? error.message : 'Detection failed');
+    } finally {
+      setIsDetecting(false);
+    }
+  };
+
   // Auto-detect cards using Claude Vision API
   const handleAutoDetect = async () => {
     if (!preview || !apiUrl) {
@@ -406,7 +454,16 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
 
       {isExpanded && (
         <div className="mt-4">
-          {preview ? (
+          {showCalibration ? (
+            <CardCalibration
+              onClose={() => setShowCalibration(false)}
+              onDone={(nextSlots, nextTemplates) => {
+                setSlots(nextSlots);
+                setTemplates(nextTemplates);
+                setShowCalibration(false);
+              }}
+            />
+          ) : preview ? (
             <div className="space-y-3">
               {/* Screenshot with click overlay */}
               <div className="relative">
@@ -443,6 +500,40 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* Offline detection — free, instant, no network call */}
+              <button
+                onClick={handleOfflineDetect}
+                disabled={isDetecting}
+                className={`w-full py-2 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors ${
+                  isDetecting
+                    ? 'bg-green-700 text-white cursor-wait'
+                    : isCalibrated
+                    ? 'bg-green-600 hover:bg-green-700 text-white'
+                    : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                }`}
+              >
+                {isDetecting ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    Reading cards...
+                  </>
+                ) : (
+                  <>
+                    <Wand2 size={18} />
+                    {isCalibrated ? 'Read Cards (offline)' : 'Teach the detector to start'}
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={() => setShowCalibration(true)}
+                className="w-full py-1.5 px-4 rounded-lg text-sm bg-gray-700/60 hover:bg-gray-700 text-gray-300 flex items-center justify-center gap-2"
+              >
+                <GraduationCap size={14} />
+                {isCalibrated ? 'Re-teach' : 'Teach'} — {templates.length}/13 ranks,{' '}
+                {slots.length}/13 slots
+              </button>
 
               {/* Auto-detect button */}
               <button

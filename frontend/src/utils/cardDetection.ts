@@ -1,395 +1,274 @@
 /**
  * Card Detection for ClubWPT Gold Screenshots
  *
- * ClubWPT Gold color scheme:
- * - Diamonds = BLUE
- * - Clubs = GREEN
- * - Spades = BLACK
- * - Hearts = RED
+ * Detection is driven entirely by calibration data the user supplies once:
  *
- * Cards have dark backgrounds with colored rank/suit symbols.
- * Winning hands appear brighter, losing hands are greyed out.
+ *   - Card slots  — where each card sits on the table, as fractions of the image
+ *   - Glyph templates — what each rank looks like, as normalised bitmaps
+ *
+ * With both in hand, reading a screenshot is deterministic: crop each slot,
+ * take the suit from the ink colour, match the rank glyph against the templates.
+ * No model, no network call, no heuristics about where cards might be.
  */
 
 import { Card, Rank, Suit } from '../types';
+import {
+  Bounds,
+  CardSlot,
+  GlyphTemplate,
+  Signature,
+  SlotRole,
+  extractSignature,
+  matchSignature,
+} from './glyphTemplates';
 
-interface DetectedCard {
-  card: Card;
-  confidence: number;
-  bounds: { x: number; y: number; width: number; height: number };
+/** Below this similarity we treat the read as a miss rather than guess. */
+const MIN_SCORE = 0.55;
+
+/** A win this narrow over the runner-up means two ranks looked alike. */
+const MIN_MARGIN = 0.04;
+
+export interface SlotReading {
+  role: SlotRole;
+  index: number;
+  /** Null when the slot is empty or the glyph could not be read. */
+  card: Card | null;
+  /** Template similarity, 0..1. Zero when nothing was read. */
+  score: number;
+  /** Gap to the runner-up rank. */
+  margin: number;
+  /** Set when the slot could not be read, explaining why. */
+  note?: string;
+  /** The normalised glyph, for showing the user what the detector saw. */
+  signature?: Signature;
 }
 
-interface DetectionResult {
+export interface DetectionResult {
   success: boolean;
-  playerCards: DetectedCard[][];
-  boardCards: DetectedCard[];
+  hero: Card[];
+  villain: Card[];
+  board: Card[];
+  /** Per-slot detail, including failures — drives the review UI. */
+  readings: SlotReading[];
   message?: string;
 }
 
-// ClubWPT Gold suit colors reference:
-// - Diamonds = BLUE (b > 150, b > r+50, b > g)
-// - Clubs = GREEN (g > 120, g > r+30, g > b+30)
-// - Hearts = RED (r > 150, r > g+50, r > b+50)
-// - Spades = BLACK (hard to distinguish from background)
-
 /**
- * Main detection function - analyzes a ClubWPT Gold screenshot
+ * Read every calibrated slot in a screenshot.
  */
-export async function detectCardsFromImage(
-  imageData: string,
-  numPlayers: number = 2
+export async function detectCards(
+  imageSrc: string,
+  slots: CardSlot[],
+  templates: GlyphTemplate[]
 ): Promise<DetectionResult> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-
-      if (!ctx) {
-        resolve({ success: false, playerCards: [], boardCards: [], message: 'Canvas not supported' });
-        return;
-      }
-
-      canvas.width = img.width;
-      canvas.height = img.height;
-      ctx.drawImage(img, 0, 0);
-
-      try {
-        const result = analyzeClubWPTTable(ctx, canvas.width, canvas.height, numPlayers);
-        resolve(result);
-      } catch (error) {
-        resolve({
-          success: false,
-          playerCards: [],
-          boardCards: [],
-          message: error instanceof Error ? error.message : 'Detection failed'
-        });
-      }
-    };
-
-    img.onerror = () => {
-      resolve({ success: false, playerCards: [], boardCards: [], message: 'Failed to load image' });
-    };
-
-    img.src = imageData;
-  });
-}
-
-/**
- * Analyze ClubWPT Gold table for cards
- */
-function analyzeClubWPTTable(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  numPlayers: number
-): DetectionResult {
-  const imageData = ctx.getImageData(0, 0, width, height);
-
-  // Find colored regions that match suit colors
-  const coloredRegions = findColoredRegions(imageData, width, height);
-
-  if (coloredRegions.length === 0) {
-    return {
-      success: false,
-      playerCards: [],
-      boardCards: [],
-      message: 'No card colors detected. Make sure the screenshot shows card faces.'
-    };
+  if (slots.length === 0) {
+    return emptyResult('No card slots calibrated yet.');
+  }
+  if (templates.length === 0) {
+    return emptyResult('No rank templates taught yet.');
   }
 
-  // Group nearby colored pixels into card regions
-  const cardRegions = groupIntoCards(coloredRegions, width, height);
+  let imageData: ImageData;
+  try {
+    imageData = await loadImageData(imageSrc);
+  } catch (error) {
+    return emptyResult(error instanceof Error ? error.message : 'Failed to load image');
+  }
 
-  // Identify each card based on color
-  const identifiedCards: DetectedCard[] = cardRegions.map(region => ({
-    card: {
-      rank: 'A' as Rank, // Rank detection requires more sophisticated analysis
-      suit: region.suit
-    },
-    confidence: region.confidence,
-    bounds: region.bounds
-  }));
+  const readings = slots.map(slot => readSlot(imageData, slot, templates));
 
-  // Group cards by position
-  const { playerCards, boardCards } = groupCardsByPosition(
-    identifiedCards,
-    width,
-    height,
-    numPlayers
-  );
+  const cardsFor = (role: SlotRole): Card[] =>
+    readings
+      .filter(r => r.role === role && r.card !== null)
+      .sort((a, b) => a.index - b.index)
+      .map(r => r.card as Card);
+
+  const hero = cardsFor('hero');
+  const villain = cardsFor('villain');
+  const board = cardsFor('board');
+  const total = hero.length + villain.length + board.length;
 
   return {
-    success: identifiedCards.length > 0,
-    playerCards,
-    boardCards,
-    message: `Detected ${identifiedCards.length} cards (suits identified, ranks need manual selection)`
+    success: total > 0,
+    hero,
+    villain,
+    board,
+    readings,
+    message:
+      total > 0
+        ? `Read ${total} card${total === 1 ? '' : 's'} from ${slots.length} slots`
+        : 'No cards read. Check the calibration lines up with this screenshot.',
   };
 }
 
-interface ColoredPixel {
-  x: number;
-  y: number;
-  suit: Suit;
-  brightness: number;
+function emptyResult(message: string): DetectionResult {
+  return { success: false, hero: [], villain: [], board: [], readings: [], message };
 }
 
 /**
- * Find pixels that match ClubWPT Gold suit colors
+ * Read a single slot: is a card there, what suit, what rank.
  */
-function findColoredRegions(
+function readSlot(
   imageData: ImageData,
-  width: number,
-  height: number
-): ColoredPixel[] {
-  const pixels: ColoredPixel[] = [];
-  const data = imageData.data;
+  slot: CardSlot,
+  templates: GlyphTemplate[]
+): SlotReading {
+  const base: SlotReading = { role: slot.role, index: slot.index, card: null, score: 0, margin: 0 };
 
-  // Sample every few pixels for performance
-  const step = 3;
+  const bounds = slotToBounds(slot, imageData.width, imageData.height);
 
-  for (let y = 0; y < height; y += step) {
-    for (let x = 0; x < width; x += step) {
-      const idx = (y * width + x) * 4;
+  const signature = extractSignature(imageData, bounds);
+  if (!signature) {
+    // No ink in the slot — normally just an empty seat or an undealt street.
+    return { ...base, note: 'empty' };
+  }
+
+  const suit = detectSuit(imageData, bounds);
+  if (!suit) {
+    return { ...base, signature, note: 'suit unclear' };
+  }
+
+  const match = matchSignature(signature, templates);
+  if (!match) {
+    return { ...base, signature, note: 'no templates' };
+  }
+
+  if (match.score < MIN_SCORE) {
+    return {
+      ...base,
+      signature,
+      score: match.score,
+      margin: match.margin,
+      note: `weak match (${Math.round(match.score * 100)}%)`,
+    };
+  }
+
+  if (match.margin < MIN_MARGIN) {
+    return {
+      ...base,
+      signature,
+      score: match.score,
+      margin: match.margin,
+      note: 'ambiguous rank',
+    };
+  }
+
+  return {
+    ...base,
+    card: { rank: match.rank as Rank, suit },
+    score: match.score,
+    margin: match.margin,
+    signature,
+  };
+}
+
+/** Convert a slot's stored fractions into pixel bounds for this image. */
+function slotToBounds(slot: CardSlot, imageWidth: number, imageHeight: number): Bounds {
+  return {
+    x: slot.x * imageWidth,
+    y: slot.y * imageHeight,
+    width: slot.width * imageWidth,
+    height: slot.height * imageHeight,
+  };
+}
+
+/**
+ * Identify the suit from the colour of the ink in a region.
+ *
+ * ClubWPT Gold uses a four-colour deck, so colour alone separates three suits.
+ * Spades are whatever is left: ink that is present but carries no strong hue.
+ * That "leftover" rule is what lets us read spades at all — trying to detect
+ * black directly is hopeless against a dark table.
+ */
+function detectSuit(imageData: ImageData, bounds: Bounds): Suit | null {
+  const { data, width: imgW, height: imgH } = imageData;
+
+  const x0 = Math.max(0, Math.floor(bounds.x));
+  const y0 = Math.max(0, Math.floor(bounds.y));
+  const x1 = Math.min(imgW, Math.ceil(bounds.x + bounds.width));
+  const y1 = Math.min(imgH, Math.ceil(bounds.y + bounds.height));
+  if (x1 <= x0 || y1 <= y0) return null;
+
+  const votes: Record<Suit, number> = { d: 0, c: 0, h: 0, s: 0 };
+  let saturated = 0;
+  let inkPixels = 0;
+
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const idx = (y * imgW + x) * 4;
       const r = data[idx];
       const g = data[idx + 1];
       const b = data[idx + 2];
 
-      const brightness = (r + g + b) / 3;
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const chroma = max - min;
 
-      // Check each suit color
-      const suit = identifySuitFromColor(r, g, b);
-      if (suit) {
-        pixels.push({ x, y, suit, brightness });
+      // Ignore pixels too dim to carry reliable colour.
+      if (max < 40) continue;
+      inkPixels++;
+
+      if (chroma < 40) continue; // Greyish — could be spade ink or card face.
+      saturated++;
+
+      if (b === max && b > r + 30) {
+        votes.d++;
+      } else if (g === max && g > r + 25 && g > b + 25) {
+        votes.c++;
+      } else if (r === max && r > g + 40 && r > b + 40) {
+        votes.h++;
       }
     }
   }
 
-  return pixels;
-}
+  if (inkPixels === 0) return null;
 
-/**
- * Identify suit based on RGB color
- */
-function identifySuitFromColor(r: number, g: number, b: number): Suit | null {
-  // Blue = Diamonds
-  if (b > 150 && b > r + 50 && b > g) {
-    return 'd';
+  const coloured = votes.d + votes.c + votes.h;
+
+  // Very little saturated colour anywhere means a monochrome glyph: spades.
+  if (saturated < inkPixels * 0.08 || coloured === 0) {
+    return 's';
   }
 
-  // Green = Clubs
-  if (g > 120 && g > r + 30 && g > b + 30) {
-    return 'c';
-  }
+  const winner = (Object.entries(votes) as [Suit, number][])
+    .filter(([suit]) => suit !== 's')
+    .sort((a, b) => b[1] - a[1])[0];
 
-  // Red = Hearts
-  if (r > 150 && r > g + 50 && r > b + 50) {
-    return 'h';
-  }
-
-  // Black = Spades (need to check it's on a card, not just dark background)
-  // Only count as spade if surrounded by lighter pixels (card background)
-  // This is tricky - skip for now as black is ambiguous
-
-  return null;
+  // Require the winning hue to actually dominate, otherwise call it unclear.
+  return winner[1] >= coloured * 0.55 ? winner[0] : null;
 }
 
-interface CardRegion {
-  suit: Suit;
-  bounds: { x: number; y: number; width: number; height: number };
-  confidence: number;
-  pixelCount: number;
-}
-
-/**
- * Group colored pixels into card regions
- */
-function groupIntoCards(
-  pixels: ColoredPixel[],
-  _width: number,
-  _height: number
-): CardRegion[] {
-  if (pixels.length === 0) return [];
-
-  // Simple clustering - group pixels within certain distance
-  const clusters: ColoredPixel[][] = [];
-  const used = new Set<number>();
-  const clusterDistance = 50; // pixels within this distance belong to same card
-
-  for (let i = 0; i < pixels.length; i++) {
-    if (used.has(i)) continue;
-
-    const cluster: ColoredPixel[] = [pixels[i]];
-    used.add(i);
-
-    // Find all pixels close to this cluster
-    for (let j = i + 1; j < pixels.length; j++) {
-      if (used.has(j)) continue;
-
-      // Check if pixel j is close to any pixel in cluster
-      for (const cp of cluster) {
-        const dist = Math.sqrt(
-          Math.pow(pixels[j].x - cp.x, 2) +
-          Math.pow(pixels[j].y - cp.y, 2)
-        );
-        if (dist < clusterDistance && pixels[j].suit === cp.suit) {
-          cluster.push(pixels[j]);
-          used.add(j);
-          break;
-        }
+/** Decode a data URL or object URL into pixel data. */
+export function loadImageData(src: string): Promise<ImageData> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) {
+        reject(new Error('Canvas not supported'));
+        return;
       }
-    }
-
-    if (cluster.length >= 5) { // Minimum pixels to be a card
-      clusters.push(cluster);
-    }
-  }
-
-  // Convert clusters to card regions
-  return clusters.map(cluster => {
-    const xs = cluster.map(p => p.x);
-    const ys = cluster.map(p => p.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-
-    // Most common suit in cluster
-    const suitCounts: Record<string, number> = {};
-    for (const p of cluster) {
-      suitCounts[p.suit] = (suitCounts[p.suit] || 0) + 1;
-    }
-    const suit = Object.entries(suitCounts)
-      .sort((a, b) => b[1] - a[1])[0][0] as Suit;
-
-    return {
-      suit,
-      bounds: {
-        x: minX,
-        y: minY,
-        width: maxX - minX,
-        height: maxY - minY
-      },
-      confidence: Math.min(cluster.length / 20 * 100, 90),
-      pixelCount: cluster.length
+      ctx.drawImage(img, 0, 0);
+      resolve(ctx.getImageData(0, 0, canvas.width, canvas.height));
     };
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = src;
   });
 }
 
 /**
- * Group detected cards by their position on the table
+ * Read the suit and glyph at an arbitrary region — used during calibration to
+ * preview what the detector will see before the user commits a label.
  */
-function groupCardsByPosition(
-  cards: DetectedCard[],
-  imageWidth: number,
-  imageHeight: number,
-  numPlayers: number
-): { playerCards: DetectedCard[][]; boardCards: DetectedCard[] } {
-  const playerCards: DetectedCard[][] = Array.from({ length: numPlayers }, () => []);
-  const boardCards: DetectedCard[] = [];
-
-  // Sort cards by vertical position
-  const sortedCards = [...cards].sort((a, b) => a.bounds.y - b.bounds.y);
-
-  // ClubWPT Gold layout:
-  // - Board cards are in the center (roughly 35-50% from top)
-  // - Hero cards are at bottom left (70%+ from top, left side)
-  // - Villain cards are on the right side
-
-  const boardTop = imageHeight * 0.30;
-  const boardBottom = imageHeight * 0.55;
-  const heroBottom = imageHeight * 0.60;
-
-  for (const card of sortedCards) {
-    const centerY = card.bounds.y + card.bounds.height / 2;
-    const centerX = card.bounds.x + card.bounds.width / 2;
-
-    if (centerY >= boardTop && centerY <= boardBottom && centerX > imageWidth * 0.25 && centerX < imageWidth * 0.75) {
-      // Board card (center of table)
-      boardCards.push(card);
-    } else if (centerY >= heroBottom) {
-      // Player card - determine which player based on horizontal position
-      if (centerX < imageWidth * 0.4) {
-        // Hero (left side)
-        playerCards[0].push(card);
-      } else if (centerX > imageWidth * 0.6) {
-        // Villain (right side)
-        if (numPlayers > 1) {
-          playerCards[1].push(card);
-        }
-      }
-    }
-  }
-
-  // Sort board cards left to right
-  boardCards.sort((a, b) => a.bounds.x - b.bounds.x);
-
-  // Sort each player's cards left to right
-  for (const hand of playerCards) {
-    hand.sort((a, b) => a.bounds.x - b.bounds.x);
-  }
-
-  return { playerCards, boardCards };
-}
-
-/**
- * Draw detection results on a canvas for debugging
- */
-export function drawDetectionResults(
-  canvas: HTMLCanvasElement,
-  imageData: string,
-  result: DetectionResult
-): void {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  const img = new Image();
-  img.onload = () => {
-    canvas.width = img.width;
-    canvas.height = img.height;
-    ctx.drawImage(img, 0, 0);
-
-    // Draw boxes around detected cards with suit colors
-    const suitColors: Record<Suit, string> = {
-      'd': '#0088ff', // Blue for diamonds
-      'c': '#00cc00', // Green for clubs
-      'h': '#ff0000', // Red for hearts
-      's': '#333333'  // Dark gray for spades
-    };
-
-    ctx.lineWidth = 3;
-
-    for (const playerHand of result.playerCards) {
-      for (const card of playerHand) {
-        ctx.strokeStyle = suitColors[card.card.suit];
-        ctx.strokeRect(
-          card.bounds.x,
-          card.bounds.y,
-          card.bounds.width,
-          card.bounds.height
-        );
-        // Label
-        ctx.fillStyle = suitColors[card.card.suit];
-        ctx.font = '14px Arial';
-        ctx.fillText(
-          `${card.card.rank}${card.card.suit}`,
-          card.bounds.x,
-          card.bounds.y - 5
-        );
-      }
-    }
-
-    ctx.strokeStyle = '#ffff00';
-    for (const card of result.boardCards) {
-      ctx.strokeStyle = suitColors[card.card.suit];
-      ctx.strokeRect(
-        card.bounds.x,
-        card.bounds.y,
-        card.bounds.width,
-        card.bounds.height
-      );
-    }
+export function inspectRegion(
+  imageData: ImageData,
+  bounds: Bounds
+): { signature: Signature | null; suit: Suit | null } {
+  return {
+    signature: extractSignature(imageData, bounds),
+    suit: detectSuit(imageData, bounds),
   };
-
-  img.src = imageData;
 }
