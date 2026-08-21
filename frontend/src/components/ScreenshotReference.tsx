@@ -3,7 +3,14 @@ import { Upload, X, Image, MousePointer, Info, Zap, Loader2, Settings, Crosshair
 import { Card, Rank, Suit } from '../types';
 import { RANKS, SUITS, SUIT_SYMBOLS } from '../utils/cards';
 import { detectCards } from '../utils/cardDetection';
-import { CardSlot, GlyphTemplate, loadSlots, loadTemplates } from '../utils/glyphTemplates';
+import {
+  CardSlot,
+  GlyphTemplate,
+  SuitSample,
+  loadSlots,
+  loadSuitSamples,
+  loadTemplates,
+} from '../utils/glyphTemplates';
 import CardCalibration from './CardCalibration';
 
 // Detect suit from RGB color
@@ -142,6 +149,7 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
   const [showCalibration, setShowCalibration] = useState(false);
   const [slots, setSlots] = useState<CardSlot[]>(() => loadSlots());
   const [templates, setTemplates] = useState<GlyphTemplate[]>(() => loadTemplates());
+  const [suitSamples, setSuitSamples] = useState<SuitSample[]>(() => loadSuitSamples());
   const isCalibrated = slots.length > 0 && templates.length > 0;
 
   const handleFile = useCallback((file: File) => {
@@ -315,7 +323,7 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
     setDetectionError(null);
 
     try {
-      const result = await detectCards(preview, slots, templates);
+      const result = await detectCards(preview, slots, templates, suitSamples);
       const asText = (cards: Card[]) => cards.map(c => `${c.rank}${c.suit}`).join(' ');
 
       setCollectedCards({ hero: result.hero, villain: result.villain, board: result.board });
@@ -457,9 +465,10 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
           {showCalibration ? (
             <CardCalibration
               onClose={() => setShowCalibration(false)}
-              onDone={(nextSlots, nextTemplates) => {
+              onDone={(nextSlots, nextTemplates, nextSuitSamples) => {
                 setSlots(nextSlots);
                 setTemplates(nextTemplates);
+                setSuitSamples(nextSuitSamples);
                 setShowCalibration(false);
               }}
             />
@@ -768,6 +777,7 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
               </div>
             </div>
           ) : (
+            <div className="space-y-2">
             <div
               className="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center cursor-pointer hover:border-gray-500 transition-colors"
               onDragOver={(e) => e.preventDefault()}
@@ -781,7 +791,9 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                 Drop screenshot, paste (Ctrl+V), or click to upload
               </p>
               <p className="text-gray-500 text-xs mt-1">
-                {apiUrl ? 'AI will auto-detect cards' : 'Configure Vision API in settings for auto-detection'}
+                {isCalibrated
+                  ? 'Cards will be read offline from your calibration'
+                  : 'Teach the detector below to read cards offline'}
               </p>
               <input
                 id="screenshot-input"
@@ -790,6 +802,18 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                 onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
                 className="hidden"
               />
+            </div>
+
+            {/* Reachable before uploading — teaching is the first thing to do. */}
+            <button
+              onClick={() => setShowCalibration(true)}
+              className="w-full py-2 px-4 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 flex items-center justify-center gap-2"
+            >
+              <GraduationCap size={16} />
+              {isCalibrated
+                ? `Re-teach — ${templates.length}/13 ranks, ${suitSamples.length} suit samples`
+                : 'Teach the detector (one-time setup)'}
+            </button>
             </div>
           )}
         </div>

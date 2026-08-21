@@ -128,6 +128,117 @@ export function extractSignature(
   return fitToBox(ink, w, minX, minY, maxX, maxY);
 }
 
+export interface InkColor {
+  r: number;
+  g: number;
+  b: number;
+}
+
+/**
+ * Mean colour of the ink in a region.
+ *
+ * Uses the same background-from-the-border rule as extractSignature, so it
+ * measures the glyph itself rather than the card it sits on.
+ */
+export function extractInkColor(imageData: ImageData, bounds: Bounds): InkColor | null {
+  const { data, width: imgW, height: imgH } = imageData;
+
+  const x0 = Math.max(0, Math.floor(bounds.x));
+  const y0 = Math.max(0, Math.floor(bounds.y));
+  const x1 = Math.min(imgW, Math.ceil(bounds.x + bounds.width));
+  const y1 = Math.min(imgH, Math.ceil(bounds.y + bounds.height));
+
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w < 3 || h < 3) return null;
+
+  const lumAt = (x: number, y: number) => {
+    const idx = ((y0 + y) * imgW + (x0 + x)) * 4;
+    return 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+  };
+
+  const border: number[] = [];
+  for (let x = 0; x < w; x++) border.push(lumAt(x, 0), lumAt(x, h - 1));
+  for (let y = 0; y < h; y++) border.push(lumAt(0, y), lumAt(w - 1, y));
+  border.sort((a, b) => a - b);
+  const background = border[Math.floor(border.length / 2)];
+
+  let maxDist = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const d = Math.abs(lumAt(x, y) - background);
+      if (d > maxDist) maxDist = d;
+    }
+  }
+  if (maxDist < 24) return null;
+
+  // Average only the strongest ink, so anti-aliased edges blending into the
+  // card background don't wash the colour out.
+  const threshold = maxDist * 0.7;
+  let sumR = 0;
+  let sumG = 0;
+  let sumB = 0;
+  let n = 0;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (Math.abs(lumAt(x, y) - background) < threshold) continue;
+      const idx = ((y0 + y) * imgW + (x0 + x)) * 4;
+      sumR += data[idx];
+      sumG += data[idx + 1];
+      sumB += data[idx + 2];
+      n++;
+    }
+  }
+
+  if (n === 0) return null;
+  return { r: sumR / n, g: sumG / n, b: sumB / n };
+}
+
+/**
+ * Reduce a colour to features that survive dimming.
+ *
+ * Chromaticity carries the hue independent of brightness, which matters because
+ * folded hands are drawn greyed out. Saturation is kept as a separate axis so an
+ * achromatic glyph stays distinguishable from a coloured one.
+ */
+function colorFeatures(color: InkColor): [number, number, number] {
+  const sum = color.r + color.g + color.b || 1;
+  const max = Math.max(color.r, color.g, color.b);
+  const min = Math.min(color.r, color.g, color.b);
+  const saturation = max === 0 ? 0 : (max - min) / max;
+  return [color.r / sum, color.g / sum, saturation];
+}
+
+/**
+ * Nearest taught suit colour.
+ *
+ * Every sample the user labelled during calibration is a ground-truth example
+ * of what that suit looks like on their table, so this needs no thresholds.
+ */
+export function matchSuitByColor(
+  color: InkColor,
+  samples: SuitSample[]
+): { suit: Suit; distance: number } | null {
+  if (samples.length === 0) return null;
+
+  const [fr, fg, fs] = colorFeatures(color);
+  let best: { suit: Suit; distance: number } | null = null;
+
+  for (const sample of samples) {
+    const [sr, sg, ss] = colorFeatures(sample);
+    // Chromaticity dominates; saturation breaks ties between similar hues.
+    const distance = Math.sqrt(
+      (fr - sr) ** 2 + (fg - sg) ** 2 + ((fs - ss) * 0.5) ** 2
+    );
+    if (!best || distance < best.distance) {
+      best = { suit: sample.suit, distance };
+    }
+  }
+
+  return best;
+}
+
 /**
  * Fit the ink bounding box into GLYPH_W x GLYPH_H, preserving aspect ratio and
  * centering the result. Uses box sampling so downscaling keeps thin strokes.
@@ -248,6 +359,12 @@ export function matchSignature(
 
 const TEMPLATE_KEY = 'plo_glyph_templates_v1';
 const SLOTS_KEY = 'plo_card_slots_v1';
+const SUIT_SAMPLES_KEY = 'plo_suit_samples_v1';
+
+/** A colour the user confirmed belongs to a given suit. */
+export interface SuitSample extends InkColor {
+  suit: Suit;
+}
 
 export type SlotRole = 'hero' | 'villain' | 'board';
 
@@ -324,6 +441,42 @@ export function addSlot(slots: CardSlot[], next: CardSlot): CardSlot[] {
 
 export function clearSlots(): void {
   localStorage.removeItem(SLOTS_KEY);
+}
+
+export function loadSuitSamples(): SuitSample[] {
+  try {
+    const raw = localStorage.getItem(SUIT_SAMPLES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveSuitSamples(samples: SuitSample[]): void {
+  localStorage.setItem(SUIT_SAMPLES_KEY, JSON.stringify(samples));
+}
+
+/**
+ * Record a confirmed suit colour.
+ *
+ * Several samples per suit are kept — a suit can be drawn at different
+ * brightnesses across the table — but capped so one suit can't crowd out the
+ * others in the nearest-neighbour search.
+ */
+export function addSuitSample(samples: SuitSample[], next: SuitSample): SuitSample[] {
+  const MAX_PER_SUIT = 6;
+  const sameSuit = samples.filter(s => s.suit === next.suit);
+  const others = samples.filter(s => s.suit !== next.suit);
+  const trimmed = [...sameSuit, next].slice(-MAX_PER_SUIT);
+  const updated = [...others, ...trimmed];
+  saveSuitSamples(updated);
+  return updated;
+}
+
+export function clearSuitSamples(): void {
+  localStorage.removeItem(SUIT_SAMPLES_KEY);
 }
 
 /** How many slots each role expects, for progress display during calibration. */

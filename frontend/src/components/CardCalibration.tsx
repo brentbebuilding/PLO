@@ -10,17 +10,26 @@ import {
   SLOT_COUNTS,
   Signature,
   SlotRole,
+  SuitSample,
   addSlot,
+  addSuitSample,
   addTemplate,
   clearSlots,
+  clearSuitSamples,
   clearTemplates,
+  extractInkColor,
   loadSlots,
+  loadSuitSamples,
   loadTemplates,
   signatureToDataUrl,
 } from '../utils/glyphTemplates';
 
 interface CardCalibrationProps {
-  onDone?: (slots: CardSlot[], templates: GlyphTemplate[]) => void;
+  onDone?: (
+    slots: CardSlot[],
+    templates: GlyphTemplate[],
+    suitSamples: SuitSample[]
+  ) => void;
   onClose?: () => void;
 }
 
@@ -50,6 +59,7 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
   const [imageData, setImageData] = useState<ImageData | null>(null);
   const [slots, setSlots] = useState<CardSlot[]>(() => loadSlots());
   const [templates, setTemplates] = useState<GlyphTemplate[]>(() => loadTemplates());
+  const [suitSamples, setSuitSamples] = useState<SuitSample[]>(() => loadSuitSamples());
   const [target, setTarget] = useState<{ role: SlotRole; index: number }>({
     role: 'hero',
     index: 0,
@@ -156,7 +166,7 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
       return;
     }
 
-    const { signature, suit } = inspectRegion(imageData, bounds);
+    const { signature, suit } = inspectRegion(imageData, bounds, suitSamples);
     if (!signature) {
       setError('No glyph found in that box. Try a tighter box around the rank.');
       return;
@@ -166,7 +176,12 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
     setPending({ bounds, signature, suit });
   };
 
-  /** Commit the pending region as a slot plus a rank template. */
+  /**
+   * Commit the pending region as a slot, a rank template, and a suit colour.
+   *
+   * The suit the user picks is ground truth, so we record what that suit's ink
+   * actually looks like here rather than relying on a guessed colour rule.
+   */
   const commit = (rank: Rank, suit: Suit) => {
     if (!pending || !pending.signature || !imageData) return;
 
@@ -181,6 +196,12 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
 
     setSlots(addSlot(slots, slot));
     setTemplates(addTemplate(templates, { rank, suit, signature: pending.signature }));
+
+    const ink = extractInkColor(imageData, pending.bounds);
+    if (ink) {
+      setSuitSamples(addSuitSample(suitSamples, { suit, ...ink }));
+    }
+
     setPending(null);
     advance();
   };
@@ -199,8 +220,10 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
   const reset = () => {
     clearSlots();
     clearTemplates();
+    clearSuitSamples();
     setSlots([]);
     setTemplates([]);
+    setSuitSamples([]);
     setTarget({ role: 'hero', index: 0 });
     setPending(null);
   };
@@ -369,7 +392,7 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
               Skip this card
             </button>
             <button
-              onClick={() => onDone?.(slots, templates)}
+              onClick={() => onDone?.(slots, templates, suitSamples)}
               className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm flex items-center justify-center gap-2"
             >
               <Check size={16} />
@@ -377,7 +400,12 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
             </button>
           </div>
 
-          <Progress captured={captured} taughtRanks={taughtRanks} onJump={setTarget} />
+          <Progress
+            captured={captured}
+            taughtRanks={taughtRanks}
+            suitSamples={suitSamples}
+            onJump={setTarget}
+          />
         </>
       )}
     </div>
@@ -436,8 +464,9 @@ const RankSuitPicker: React.FC<{
 const Progress: React.FC<{
   captured: Set<string>;
   taughtRanks: Set<Rank>;
+  suitSamples: SuitSample[];
   onJump: (target: { role: SlotRole; index: number }) => void;
-}> = ({ captured, taughtRanks, onJump }) => (
+}> = ({ captured, taughtRanks, suitSamples, onJump }) => (
   <div className="border-t border-gray-700 pt-3 space-y-2">
     {ROLE_ORDER.map(role => (
       <div key={role} className="flex items-center gap-2">
@@ -467,6 +496,24 @@ const Progress: React.FC<{
           — missing {RANKS.filter(r => !taughtRanks.has(r)).map(r => (r === 'T' ? '10' : r)).join(' ')}
         </span>
       )}
+    </div>
+
+    {/* Suits need at least one confirmed sample each before colour matching works. */}
+    <div className="text-xs text-gray-500 flex items-center gap-2">
+      <span>Suit colours learned:</span>
+      {SUITS.map(s => {
+        const count = suitSamples.filter(sample => sample.suit === s).length;
+        return (
+          <span
+            key={s}
+            className={count > 0 ? 'text-green-400' : 'text-gray-600'}
+            title={count > 0 ? `${count} sample${count === 1 ? '' : 's'}` : 'not taught yet'}
+          >
+            {SUIT_SYMBOLS[s]}
+            {count > 0 ? ` ${count}` : ' —'}
+          </span>
+        );
+      })}
     </div>
   </div>
 );

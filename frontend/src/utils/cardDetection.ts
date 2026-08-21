@@ -18,8 +18,11 @@ import {
   GlyphTemplate,
   Signature,
   SlotRole,
+  SuitSample,
+  extractInkColor,
   extractSignature,
   matchSignature,
+  matchSuitByColor,
 } from './glyphTemplates';
 
 /** Below this similarity we treat the read as a miss rather than guess. */
@@ -59,7 +62,8 @@ export interface DetectionResult {
 export async function detectCards(
   imageSrc: string,
   slots: CardSlot[],
-  templates: GlyphTemplate[]
+  templates: GlyphTemplate[],
+  suitSamples: SuitSample[] = []
 ): Promise<DetectionResult> {
   if (slots.length === 0) {
     return emptyResult('No card slots calibrated yet.');
@@ -75,7 +79,7 @@ export async function detectCards(
     return emptyResult(error instanceof Error ? error.message : 'Failed to load image');
   }
 
-  const readings = slots.map(slot => readSlot(imageData, slot, templates));
+  const readings = slots.map(slot => readSlot(imageData, slot, templates, suitSamples));
 
   const cardsFor = (role: SlotRole): Card[] =>
     readings
@@ -111,7 +115,8 @@ function emptyResult(message: string): DetectionResult {
 function readSlot(
   imageData: ImageData,
   slot: CardSlot,
-  templates: GlyphTemplate[]
+  templates: GlyphTemplate[],
+  suitSamples: SuitSample[]
 ): SlotReading {
   const base: SlotReading = { role: slot.role, index: slot.index, card: null, score: 0, margin: 0 };
 
@@ -123,7 +128,7 @@ function readSlot(
     return { ...base, note: 'empty' };
   }
 
-  const suit = detectSuit(imageData, bounds);
+  const suit = identifySuit(imageData, bounds, suitSamples);
   if (!suit) {
     return { ...base, signature, note: 'suit unclear' };
   }
@@ -173,14 +178,36 @@ function slotToBounds(slot: CardSlot, imageWidth: number, imageHeight: number): 
 }
 
 /**
- * Identify the suit from the colour of the ink in a region.
+ * Identify the suit of the ink in a region.
+ *
+ * Prefers colours the user confirmed during calibration — those are ground truth
+ * for their table, and need no thresholds. Falls back to a hand-tuned rule only
+ * when nothing has been taught yet.
+ */
+export function identifySuit(
+  imageData: ImageData,
+  bounds: Bounds,
+  suitSamples: SuitSample[]
+): Suit | null {
+  if (suitSamples.length > 0) {
+    const color = extractInkColor(imageData, bounds);
+    if (color) {
+      const match = matchSuitByColor(color, suitSamples);
+      if (match) return match.suit;
+    }
+  }
+  return detectSuitHeuristic(imageData, bounds);
+}
+
+/**
+ * Threshold-based suit guess, used before any colours have been taught.
  *
  * ClubWPT Gold uses a four-colour deck, so colour alone separates three suits.
  * Spades are whatever is left: ink that is present but carries no strong hue.
  * That "leftover" rule is what lets us read spades at all — trying to detect
  * black directly is hopeless against a dark table.
  */
-function detectSuit(imageData: ImageData, bounds: Bounds): Suit | null {
+function detectSuitHeuristic(imageData: ImageData, bounds: Bounds): Suit | null {
   const { data, width: imgW, height: imgH } = imageData;
 
   const x0 = Math.max(0, Math.floor(bounds.x));
@@ -265,10 +292,11 @@ export function loadImageData(src: string): Promise<ImageData> {
  */
 export function inspectRegion(
   imageData: ImageData,
-  bounds: Bounds
+  bounds: Bounds,
+  suitSamples: SuitSample[] = []
 ): { signature: Signature | null; suit: Suit | null } {
   return {
     signature: extractSignature(imageData, bounds),
-    suit: detectSuit(imageData, bounds),
+    suit: identifySuit(imageData, bounds, suitSamples),
   };
 }
