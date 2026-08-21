@@ -511,6 +511,12 @@ function App() {
         <div className="max-w-6xl mx-auto text-center text-gray-500 text-sm">
           PLO Odds Calculator - Built with React & TypeScript
         </div>
+        {/* Build marker — confirms at a glance which deploy is live. */}
+        <div className="max-w-6xl mx-auto text-center mt-2">
+          <span className="inline-block px-3 py-1 rounded-full bg-green-600 text-white text-base font-bold">
+            VERSION 2.0 — offline detection
+          </span>
+        </div>
       </footer>
 
       {/* Card Selector Modal */}
