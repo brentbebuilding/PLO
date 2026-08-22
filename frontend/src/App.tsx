@@ -524,7 +524,7 @@ function App() {
         {/* Build marker — confirms at a glance which deploy is live. */}
         <div className="max-w-6xl mx-auto text-center mt-2">
           <span className="inline-block px-3 py-1 rounded-full bg-green-600 text-white text-base font-bold">
-            VERSION 3.8
+            VERSION 3.9 — opponents
           </span>
         </div>
       </footer>

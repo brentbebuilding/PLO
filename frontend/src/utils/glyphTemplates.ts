@@ -106,7 +106,12 @@ export function extractSignature(
     const d = Math.abs(lum[i] - background);
     if (d > maxDist) maxDist = d;
   }
-  if (maxDist < 24) return null; // Flat patch — no glyph here.
+  // Cards the winner didn't use are drawn very dim: one sidebar card measured a
+  // luminance range of 5-33, against 14-105 for its neighbour. A floor of 24
+  // discarded those outright. At 14 they extract, and across the screenshot set
+  // it takes glyphs that fail to extract at all from 47 to none while leaving
+  // every board card reading correctly.
+  if (maxDist < 14) return null; // Flat patch — no glyph here.
   const threshold = maxDist * 0.45;
 
   const ink = new Uint8Array(w * h);

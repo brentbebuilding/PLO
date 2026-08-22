@@ -120,8 +120,8 @@ export async function detectCards(
   const handReadings: SlotReading[] = [];
   if (seatReadings.length === 0) {
     const rows = anchor
-      ? findHandRows(regions, anchor)
-      : findHandRows(regions, { cards: [], originX: 0, originY: 0, unitX: 1, unitY: 1 }, 3);
+      ? findHandRows(regions, anchor, 2, imageData)
+      : findHandRows(regions, { cards: [], originX: 0, originY: 0, unitX: 1, unitY: 1 }, 3, imageData);
     rows.forEach((row, seatIndex) => {
       row.forEach((card, cardIndex) => {
         const reading = readBoardCard(imageData, card, cardIndex, templates);

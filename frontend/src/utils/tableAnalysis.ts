@@ -348,7 +348,8 @@ export function findBoard(
 export function findHandRows(
   regions: CardRegion[],
   board: BoardAnchor,
-  minCards = 2
+  minCards = 2,
+  image?: PixelSource
 ): CardRegion[][] {
   const candidates = regions.filter(r => {
     const aspect = r.width / r.height;
@@ -372,10 +373,114 @@ export function findHandRows(
     else rows.push([card]);
   }
 
-  return rows
+  const usable = rows
     .filter(r => r.length >= minCards)
-    .map(r => r.sort((a, b) => a.x - b.x))
-    .sort((a, b) => b.length - a.length);
+    .map(r => r.sort((a, b) => a.x - b.x));
+
+  // When the hands panel is open it lists every revealed hand, and the same
+  // players are also drawn at their seats — so a hand can be found twice and
+  // reported as two opponents. Counting one player's cards twice is worse than
+  // missing them: it removes cards from the deck that are still live.
+  //
+  // The panel is recognisable as rows sharing an x origin and card size, so
+  // when two or more such rows exist they are the authoritative list and the
+  // seat copies are dropped.
+  const key = (row: CardRegion[]) =>
+    `${Math.round(row[0].x / 8)}:${Math.round(row[0].height / 4)}`;
+  const counts = new Map<string, number>();
+  for (const row of usable) counts.set(key(row), (counts.get(key(row)) ?? 0) + 1);
+
+  const panelKey = [...counts.entries()].find(([, n]) => n >= 2)?.[0];
+  const chosen = panelKey ? usable.filter(row => key(row) === panelKey) : usable;
+
+  const filled = image ? chosen.map(row => fillRowGaps(row, image)) : chosen;
+  return filled.sort((a, b) => a[0].y - b[0].y);
+}
+
+/**
+ * Insert cards that were missed because their colour region never formed.
+ *
+ * A very dim card can fail to register at all, leaving a hole. Cards in a row
+ * sit at a regular pitch, so a gap of two pitches means exactly one card is
+ * missing and its position is known. One observed row ran x = 221, 258, 331:
+ * a gap of 73 where the pitch is 37.
+ *
+ * A dropped card is worse than an unread one — a three-card hand looks
+ * complete rather than obviously broken — so it is worth recovering the slot
+ * even if the rank then fails to read.
+ */
+function fillRowGaps(row: CardRegion[], image: PixelSource): CardRegion[] {
+  if (row.length < 2) return row;
+
+  // The smallest gap is the true pitch. A median would be wrong exactly when it
+  // matters: a row of x = 221, 258, 331 has gaps 37 and 73, and the median of
+  // two values takes the larger — reading the hole as the spacing and finding
+  // nothing missing.
+  const gaps = row.slice(1).map((c, i) => c.x - row[i].x);
+  const pitch = Math.min(...gaps);
+  if (pitch <= 0) return row;
+
+  const out: CardRegion[] = [row[0]];
+  for (let i = 1; i < row.length; i++) {
+    const missing = Math.round((row[i].x - row[i - 1].x) / pitch) - 1;
+    // Only bridge small holes; a large jump is a different group, not a gap.
+    if (missing > 0 && missing <= 2) {
+      for (let k = 1; k <= missing; k++) {
+        const x = Math.round(row[i - 1].x + pitch * k);
+        const template = row[i - 1];
+        const suit = dominantSuit(image, x, template.y, template.width, template.height);
+        if (!suit) continue;
+        out.push({
+          suit,
+          x,
+          y: template.y,
+          width: template.width,
+          height: template.height,
+          pixels: 0,
+          fill: 0,
+        });
+      }
+    }
+    out.push(row[i]);
+  }
+  return out;
+}
+
+/** Most common card-face suit within a rectangle, for a synthesised slot. */
+function dominantSuit(
+  image: PixelSource,
+  x0: number,
+  y0: number,
+  w: number,
+  h: number
+): Suit | null {
+  const { width: W, height: H, data } = image;
+  const refs = DEFAULT_SUIT_REFERENCES.map(r => ({
+    suit: r.suit,
+    features: features(r.r, r.g, r.b),
+  }));
+  const votes = new Map<Suit, number>();
+
+  for (let y = Math.max(0, y0); y < Math.min(H, y0 + h); y++) {
+    for (let x = Math.max(0, x0); x < Math.min(W, x0 + w); x++) {
+      const i = (y * W + x) * 4;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      if (0.299 * r + 0.587 * g + 0.114 * b < MIN_LUMINANCE) continue;
+      const f = features(r, g, b);
+      for (const ref of refs) {
+        if (!saturationAgrees(f[2], ref.features[2])) continue;
+        if (chromaDistance(f, ref.features) < CHROMA_TOLERANCE) {
+          votes.set(ref.suit, (votes.get(ref.suit) ?? 0) + 1);
+          break;
+        }
+      }
+    }
+  }
+
+  const best = [...votes.entries()].sort((a, b) => b[1] - a[1])[0];
+  return best && best[1] > w * h * 0.15 ? best[0] : null;
 }
 
 /**
