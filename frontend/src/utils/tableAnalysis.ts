@@ -262,9 +262,22 @@ export function findBoard(regions: CardRegion[]): BoardAnchor | null {
     else rows.push([card]);
   }
 
-  rows.sort((a, b) => b.length - a.length);
-  const board = rows[0];
-  if (!board || board.length < 3) return null;
+  // Pick by card size, not by how many are in the row.
+  //
+  // Counting fails on a turn: four community cards tie with a four-card hole
+  // hand and the winner is arbitrary — which is how a hero's K K 9 2 once got
+  // read as the board. The client draws community cards markedly larger than
+  // hole cards or sidebar thumbnails (3.6x the area in the case that broke),
+  // and across every screenshot tested the largest row was the true board.
+  const medianArea = (row: CardRegion[]) => {
+    const areas = row.map(c => c.width * c.height).sort((a, b) => a - b);
+    return areas[Math.floor(areas.length / 2)];
+  };
+
+  const board = rows
+    .filter(row => row.length >= 3)
+    .sort((a, b) => medianArea(b) - medianArea(a))[0];
+  if (!board) return null;
 
   board.sort((a, b) => a.x - b.x);
 
