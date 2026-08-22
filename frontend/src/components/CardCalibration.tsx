@@ -17,7 +17,7 @@ import {
   clearSlots,
   clearSuitSamples,
   clearTemplates,
-  extractInkColor,
+  extractBackgroundColor,
   loadSlots,
   loadSuitSamples,
   loadTemplates,
@@ -197,9 +197,10 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
     setSlots(addSlot(slots, slot));
     setTemplates(addTemplate(templates, { rank, suit, signature: pending.signature }));
 
-    const ink = extractInkColor(imageData, pending.bounds);
-    if (ink) {
-      setSuitSamples(addSuitSample(suitSamples, { suit, ...ink }));
+    // The card face carries the suit, so sample that rather than the white ink.
+    const face = extractBackgroundColor(imageData, pending.bounds);
+    if (face) {
+      setSuitSamples(addSuitSample(suitSamples, { suit, ...face }));
     }
 
     setPending(null);
@@ -279,8 +280,9 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
 
       <p className="text-gray-400 text-sm">
         Drag a box around the <strong className="text-gray-200">rank character</strong> of each
-        card — the A, K, 7 and so on. You only do this once; after that any screenshot from this
-        table reads instantly.
+        card — the A, K, 7 and so on. Keep the box{' '}
+        <strong className="text-gray-200">inside the card</strong>: its edges sample the card
+        colour, which is how the suit is read. You only do this once.
       </p>
 
       {!preview ? (

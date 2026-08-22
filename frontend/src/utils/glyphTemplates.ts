@@ -196,6 +196,59 @@ export function extractInkColor(imageData: ImageData, bounds: Bounds): InkColor 
 }
 
 /**
+ * Median colour of the region's border — the card face behind the glyph.
+ *
+ * ClubWPT Gold encodes the suit in the card background (blue diamonds, green
+ * clubs, dark red hearts, grey spades) and draws every rank in white. So the
+ * suit lives here, not in the ink. Median rather than mean, so a few stray
+ * pixels of table felt along one edge don't drag the reading.
+ */
+export function extractBackgroundColor(
+  imageData: ImageData,
+  bounds: Bounds
+): InkColor | null {
+  const { data, width: imgW, height: imgH } = imageData;
+
+  const x0 = Math.max(0, Math.floor(bounds.x));
+  const y0 = Math.max(0, Math.floor(bounds.y));
+  const x1 = Math.min(imgW, Math.ceil(bounds.x + bounds.width));
+  const y1 = Math.min(imgH, Math.ceil(bounds.y + bounds.height));
+
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w < 3 || h < 3) return null;
+
+  const rs: number[] = [];
+  const gs: number[] = [];
+  const bs: number[] = [];
+
+  const sample = (x: number, y: number) => {
+    const idx = ((y0 + y) * imgW + (x0 + x)) * 4;
+    rs.push(data[idx]);
+    gs.push(data[idx + 1]);
+    bs.push(data[idx + 2]);
+  };
+
+  for (let x = 0; x < w; x++) {
+    sample(x, 0);
+    sample(x, h - 1);
+  }
+  for (let y = 0; y < h; y++) {
+    sample(0, y);
+    sample(w - 1, y);
+  }
+
+  if (rs.length === 0) return null;
+
+  const median = (values: number[]) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  };
+
+  return { r: median(rs), g: median(gs), b: median(bs) };
+}
+
+/**
  * Reduce a colour to features that survive dimming.
  *
  * Chromaticity carries the hue independent of brightness, which matters because

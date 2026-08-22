@@ -19,7 +19,7 @@ import {
   Signature,
   SlotRole,
   SuitSample,
-  extractInkColor,
+  extractBackgroundColor,
   extractSignature,
   matchSignature,
   matchSuitByColor,
@@ -178,11 +178,11 @@ function slotToBounds(slot: CardSlot, imageWidth: number, imageHeight: number): 
 }
 
 /**
- * Identify the suit of the ink in a region.
+ * Identify the suit of a card region.
  *
- * Prefers colours the user confirmed during calibration — those are ground truth
- * for their table, and need no thresholds. Falls back to a hand-tuned rule only
- * when nothing has been taught yet.
+ * The suit is carried by the card face, not the rank character — ClubWPT Gold
+ * draws every rank in white on a suit-coloured card. So this reads the
+ * background and matches it against the colours confirmed during calibration.
  */
 export function identifySuit(
   imageData: ImageData,
@@ -190,7 +190,7 @@ export function identifySuit(
   suitSamples: SuitSample[]
 ): Suit | null {
   if (suitSamples.length > 0) {
-    const color = extractInkColor(imageData, bounds);
+    const color = extractBackgroundColor(imageData, bounds);
     if (color) {
       const match = matchSuitByColor(color, suitSamples);
       if (match) return match.suit;
