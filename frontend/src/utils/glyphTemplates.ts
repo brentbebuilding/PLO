@@ -153,7 +153,61 @@ export function extractSignature(
   }
   if (clippedMaxX < clippedMinX) return null;
 
+  clippedMaxX = dropDetachedFragment(ink, w, clippedMinX, clippedMaxX, minY, clippedMaxY);
+
   return fitToBox(ink, w, clippedMinX, minY, clippedMaxX, clippedMaxY);
+}
+
+/**
+ * Drop a small detached mark to the right of the rank.
+ *
+ * The client can overlay a decoration on a card — a Rabbit Hunt icon in one
+ * observed case — and it lands inside the rank crop, stretching the ink box so
+ * the rank normalises squashed and stops matching.
+ *
+ * The complication is "10", which is legitimately two separated blobs, so a
+ * plain gap test would cut it to "1". A fragment is only dropped when it sits
+ * past a wide gap AND carries little of the ink: the "0" of a 10 is around half
+ * the mass, while an overlay is a fraction of it.
+ */
+function dropDetachedFragment(
+  ink: Uint8Array,
+  stride: number,
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number
+): number {
+  const columnInk: number[] = [];
+  let totalInk = 0;
+  for (let x = minX; x <= maxX; x++) {
+    let sum = 0;
+    for (let y = minY; y <= maxY; y++) {
+      if (ink[y * stride + x] > 0) sum++;
+    }
+    columnInk.push(sum);
+    totalInk += sum;
+  }
+  if (totalInk === 0) return maxX;
+
+  const width = maxX - minX + 1;
+  const minGap = Math.max(3, Math.round(width * 0.25));
+
+  // Scan right to left for the last wide blank run.
+  let run = 0;
+  for (let i = columnInk.length - 1; i >= 0; i--) {
+    if (columnInk[i] === 0) {
+      run++;
+      continue;
+    }
+    if (run >= minGap) {
+      const beyond = columnInk.slice(i + 1).reduce((sum, n) => sum + n, 0);
+      if (beyond < totalInk * 0.35) return minX + i;
+      return maxX; // Substantial mass past the gap — part of the glyph, like a 10.
+    }
+    run = 0;
+  }
+  return maxX;
 }
 
 /**
