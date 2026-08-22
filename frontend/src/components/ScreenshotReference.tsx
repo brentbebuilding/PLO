@@ -523,9 +523,7 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                 className={`w-full py-2 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors ${
                   isDetecting
                     ? 'bg-green-700 text-white cursor-wait'
-                    : isCalibrated
-                    ? 'bg-green-600 hover:bg-green-700 text-white'
-                    : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                    : 'bg-green-600 hover:bg-green-700 text-white'
                 }`}
               >
                 {isDetecting ? (
@@ -536,7 +534,7 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                 ) : (
                   <>
                     <Wand2 size={18} />
-                    {isCalibrated ? 'Read Cards (offline)' : 'Teach the detector to start'}
+                    Read Cards (offline)
                   </>
                 )}
               </button>
@@ -797,9 +795,7 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                 Drop screenshot, paste (Ctrl+V), or click to upload
               </p>
               <p className="text-gray-500 text-xs mt-1">
-                {isCalibrated
-                  ? 'Cards will be read offline from your calibration'
-                  : 'Teach the detector below to read cards offline'}
+                Board cards are read automatically — no setup needed
               </p>
               <input
                 id="screenshot-input"

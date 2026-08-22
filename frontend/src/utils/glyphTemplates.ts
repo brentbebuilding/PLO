@@ -12,6 +12,7 @@
  */
 
 import { Card, Rank, Suit } from '../types';
+import { builtInTemplates } from './builtInTemplates';
 
 /**
  * Normalised glyph dimensions.
@@ -545,7 +546,8 @@ export interface CardSlot {
   dh: number;
 }
 
-export function loadTemplates(): GlyphTemplate[] {
+/** Templates the user has taught, ignoring the built-in set. */
+export function loadUserTemplates(): GlyphTemplate[] {
   try {
     const raw = localStorage.getItem(TEMPLATE_KEY);
     if (!raw) return [];
@@ -556,16 +558,30 @@ export function loadTemplates(): GlyphTemplate[] {
   }
 }
 
+/**
+ * Every template available for matching.
+ *
+ * Built-ins come first so a fresh install reads a screenshot with no setup;
+ * anything the user teaches is added on top rather than replacing them, since
+ * more samples per rank only helps — scoring takes the best match per rank.
+ */
+export function loadTemplates(): GlyphTemplate[] {
+  return [...builtInTemplates(), ...loadUserTemplates()];
+}
+
 export function saveTemplates(templates: GlyphTemplate[]): void {
   localStorage.setItem(TEMPLATE_KEY, JSON.stringify(templates));
 }
 
 /** Add a template, replacing any existing sample for the same rank and suit. */
-export function addTemplate(templates: GlyphTemplate[], next: GlyphTemplate): GlyphTemplate[] {
-  const filtered = templates.filter(t => !(t.rank === next.rank && t.suit === next.suit));
-  const updated = [...filtered, next];
+export function addTemplate(_templates: GlyphTemplate[], next: GlyphTemplate): GlyphTemplate[] {
+  // Persist only what the user taught — built-ins live in code, not storage.
+  const user = loadUserTemplates().filter(
+    t => !(t.rank === next.rank && t.suit === next.suit)
+  );
+  const updated = [...user, next];
   saveTemplates(updated);
-  return updated;
+  return [...builtInTemplates(), ...updated];
 }
 
 export function clearTemplates(): void {
