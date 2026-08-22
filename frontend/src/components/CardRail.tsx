@@ -53,7 +53,7 @@ export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled }) =>
                     title={taken ? 'Already in play' : undefined}
                     style={{
                       width: 'var(--rail-card-w)',
-                      height: 'calc(var(--rail-card-w) * 1.35)',
+                      height: 'calc(var(--rail-card-w) * 1.5)',
                     }}
                     className={`rounded border text-white flex flex-col items-center justify-center leading-none transition-opacity ${
                       SUIT_STYLE[suit]

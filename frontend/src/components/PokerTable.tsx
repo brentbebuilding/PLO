@@ -60,7 +60,7 @@ export const CardSlot: React.FC<CardSlotProps> = ({ card, selected, size = 'norm
   return (
     <button
       onClick={onClick}
-      style={{ width: w, height: `calc(${w} * 1.4)` }}
+      style={{ width: w, height: `calc(${w} * 1.55)` }}
       className={`rounded border-2 flex flex-col items-center justify-center leading-none shrink-0 transition-all ${
         card
           ? `${SUIT_STYLE[card.suit]} text-white`
