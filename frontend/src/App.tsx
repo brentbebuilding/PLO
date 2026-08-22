@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card } from './types';
 import { calculateEquity, SimulationResult } from './utils/equity';
 import { detectCards } from './utils/cardDetection';
@@ -40,6 +40,9 @@ function App() {
   const [dead, setDead] = useState<(Card | null)[]>(() =>
     Array.from({ length: DEAD_CARD_SLOTS }, () => null)
   );
+
+  const tableAreaRef = useRef<HTMLDivElement>(null);
+  const [tableHeight, setTableHeight] = useState(400);
 
   const [selected, setSelected] = useState<SlotRef | null>({ group: 0, index: 0 });
   const [equity, setEquity] = useState<{ players: DisplayResult[]; stage: Stage } | null>(null);
@@ -196,6 +199,17 @@ function App() {
     [readScreenshot]
   );
 
+  // The table fills whatever height is left once everything else is placed.
+  useEffect(() => {
+    const el = tableAreaRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) setTableHeight(entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   // Paste anywhere on the page drops a screenshot in.
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -212,11 +226,22 @@ function App() {
   }, [handleFile]);
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-white">
-      <header className="px-6 py-3 flex items-center justify-between border-b border-neutral-800">
-        <h1 className="text-xl font-bold">Omaha Odds Calculator</h1>
-        <div className="flex items-center gap-3 text-sm text-neutral-400">
-          <span className="hidden sm:inline">Pot Limit Omaha equity, in your browser</span>
+    <div
+      className="h-screen flex flex-col bg-neutral-950 text-white overflow-hidden"
+      style={
+        {
+          // Card sizes track whichever of width or height is tighter, so the
+          // table, deck and dead cards all stay inside one viewport.
+          '--rail-card-w': 'clamp(17px, min(1.9vw, 3.1vh), 30px)',
+          '--seat-card-w': 'clamp(19px, min(2.3vw, 3.6vh), 36px)',
+          '--board-card-w': 'clamp(22px, min(2.8vw, 4.4vh), 44px)',
+        } as React.CSSProperties
+      }
+    >
+      <header className="px-4 py-2 flex items-center justify-between border-b border-neutral-800 shrink-0">
+        <h1 className="text-lg font-bold">Omaha Odds Calculator</h1>
+        <div className="flex items-center gap-3 text-xs text-neutral-400">
+          <span className="hidden md:inline">Pot Limit Omaha equity, in your browser</span>
           <a
             href="https://github.com/brentbebuilding/PLO"
             target="_blank"
@@ -228,13 +253,13 @@ function App() {
         </div>
       </header>
 
-      <main className="bg-[#4a1414] px-4 py-4">
-        <div className="max-w-6xl mx-auto">
+      <main className="bg-[#4a1414] px-3 py-2 flex-1 min-h-0 flex flex-col">
+        <div className="max-w-6xl w-full mx-auto flex-1 min-h-0 flex flex-col gap-2">
           {/* Deck and screenshot controls */}
-          <div className="flex flex-wrap gap-4 items-start justify-between mb-4">
+          <div className="flex flex-wrap gap-3 items-start justify-between shrink-0">
             <CardRail used={usedCards} onPick={placeCard} disabled={!selected} />
 
-            <div className="flex flex-col gap-2 min-w-[220px] flex-1 max-w-xs">
+            <div className="flex flex-col gap-1.5 min-w-[180px] flex-1 max-w-[240px]">
               <div
                 onDragOver={e => e.preventDefault()}
                 onDrop={e => {
@@ -242,7 +267,7 @@ function App() {
                   if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]);
                 }}
                 onClick={() => document.getElementById('shot-input')?.click()}
-                className="border-2 border-dashed border-neutral-500 hover:border-neutral-300 rounded-lg p-3 text-center cursor-pointer bg-black/20 transition-colors"
+                className="border-2 border-dashed border-neutral-500 hover:border-neutral-300 rounded-lg p-2 text-center cursor-pointer bg-black/20 transition-colors"
               >
                 {isReading ? (
                   <div className="flex items-center justify-center gap-2 text-sm text-neutral-300 py-2">
@@ -253,15 +278,13 @@ function App() {
                   <img
                     src={screenshot}
                     alt="Screenshot"
-                    className="max-h-20 mx-auto rounded object-contain"
+                    className="max-h-14 mx-auto rounded object-contain"
                   />
                 ) : (
                   <>
-                    <Upload className="mx-auto text-neutral-400 mb-1" size={18} />
-                    <div className="text-xs text-neutral-300">
-                      Drop a screenshot here
-                    </div>
-                    <div className="text-[11px] text-neutral-500">or paste it anywhere</div>
+                    <Upload className="mx-auto text-neutral-400 mb-0.5" size={16} />
+                    <div className="text-[11px] text-neutral-300">Drop a screenshot here</div>
+                    <div className="text-[10px] text-neutral-500">or paste it anywhere</div>
                   </>
                 )}
                 <input
@@ -276,15 +299,15 @@ function App() {
               <div className="flex gap-2">
                 <button
                   onClick={newHand}
-                  className="flex-1 px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700 text-sm font-medium flex items-center justify-center gap-2"
+                  className="flex-1 px-2 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-xs font-medium flex items-center justify-center gap-1.5"
                 >
-                  <RefreshCw size={14} />
+                  <RefreshCw size={13} />
                   New Hand
                 </button>
                 <button
                   onClick={clearSlot}
                   disabled={!selected}
-                  className="px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-sm"
+                  className="px-2 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-xs"
                   title="Empty the selected slot"
                 >
                   Clear
@@ -308,17 +331,23 @@ function App() {
             </div>
           </div>
 
-          <PokerTable
-            seats={seats}
-            board={board}
-            selected={selected}
-            onSelect={setSelected}
-            equity={seatEquity}
-          />
+          <div
+            ref={tableAreaRef}
+            className="flex-1 min-h-0 flex items-center justify-center"
+            style={{ '--table-h': `${tableHeight}px` } as React.CSSProperties}
+          >
+            <PokerTable
+              seats={seats}
+              board={board}
+              selected={selected}
+              onSelect={setSelected}
+              equity={seatEquity}
+            />
+          </div>
 
-          <div className="mt-4">
-            <h2 className="text-sm font-semibold mb-2">Dead Cards</h2>
-            <div className="flex gap-1.5 flex-wrap">
+          <div className="shrink-0">
+            <h2 className="text-xs font-semibold mb-1">Dead Cards</h2>
+            <div className="flex flex-wrap" style={{ gap: 'calc(var(--seat-card-w) * 0.1)' }}>
               {dead.map((card, i) => (
                 <CardSlot
                   key={i}
@@ -333,8 +362,8 @@ function App() {
         </div>
       </main>
 
-      <footer className="px-6 py-3 text-center text-neutral-600 text-xs">
-        Runs entirely in your browser · nothing is uploaded · VERSION 5.0
+      <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
+        Runs entirely in your browser · nothing is uploaded · VERSION 5.1
       </footer>
     </div>
   );

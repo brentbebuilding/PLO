@@ -48,13 +48,20 @@ interface CardSlotProps {
   onClick: () => void;
 }
 
-/** One card position. Empty slots show a face-down back, as on a real table. */
+/**
+ * One card position.
+ *
+ * Sized from CSS variables rather than fixed classes so the whole table can be
+ * driven off whichever of width or height is the tighter constraint. Empty
+ * slots show a face-down back, as on a real table.
+ */
 export const CardSlot: React.FC<CardSlotProps> = ({ card, selected, size = 'normal', onClick }) => {
-  const dims = size === 'small' ? 'w-9 h-12' : 'w-11 h-16';
+  const w = size === 'small' ? 'var(--seat-card-w)' : 'var(--board-card-w)';
   return (
     <button
       onClick={onClick}
-      className={`${dims} rounded border-2 flex flex-col items-center justify-center leading-none shrink-0 transition-all ${
+      style={{ width: w, height: `calc(${w} * 1.4)` }}
+      className={`rounded border-2 flex flex-col items-center justify-center leading-none shrink-0 transition-all ${
         card
           ? `${SUIT_STYLE[card.suit]} text-white`
           : 'bg-rose-900/70 border-rose-950 text-rose-700/60'
@@ -66,15 +73,13 @@ export const CardSlot: React.FC<CardSlotProps> = ({ card, selected, size = 'norm
     >
       {card ? (
         <>
-          <span className={size === 'small' ? 'text-[10px]' : 'text-xs'}>
-            {SUIT_PIP[card.suit]}
-          </span>
-          <span className={size === 'small' ? 'text-xs font-semibold' : 'text-base font-semibold'}>
+          <span style={{ fontSize: `calc(${w} * 0.34)` }}>{SUIT_PIP[card.suit]}</span>
+          <span className="font-semibold" style={{ fontSize: `calc(${w} * 0.46)` }}>
             {card.rank === 'T' ? '10' : card.rank}
           </span>
         </>
       ) : (
-        <span className={size === 'small' ? 'text-base' : 'text-lg'}>✦</span>
+        <span style={{ fontSize: `calc(${w} * 0.5)` }}>✦</span>
       )}
     </button>
   );
@@ -102,13 +107,22 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   onSelect,
   equity,
 }) => (
-  <div className="relative w-full" style={{ aspectRatio: '16 / 10' }}>
+  <div
+    className="relative mx-auto"
+    style={{
+      // Fit whichever dimension runs out first, so a short window doesn't
+      // push the dead cards off the bottom.
+      aspectRatio: '16 / 10',
+      width: 'min(100%, calc(var(--table-h) * 1.6))',
+      maxHeight: '100%',
+    }}
+  >
     {/* Felt. Deliberately unbranded. */}
-    <div className="absolute inset-[8%] rounded-[50%] bg-gradient-to-b from-emerald-800 to-emerald-900 border-[14px] border-neutral-900 shadow-2xl" />
+    <div className="absolute inset-[8%] rounded-[50%] bg-gradient-to-b from-emerald-800 to-emerald-900 border-[max(6px,0.9vmin)] border-neutral-900 shadow-2xl" />
     <div className="absolute inset-[10%] rounded-[50%] border border-emerald-700/40" />
 
     {/* Community cards, centred. */}
-    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-1.5">
+    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex" style={{ gap: 'calc(var(--board-card-w) * 0.12)' }}>
       {board.map((card, i) => (
         <CardSlot
           key={i}
@@ -122,8 +136,8 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     {seats.map((hand, seatIndex) => (
       <div
         key={seatIndex}
-        className="absolute flex gap-1"
-        style={SEAT_POSITIONS[seatIndex]}
+        className="absolute flex"
+        style={{ ...SEAT_POSITIONS[seatIndex], gap: 'calc(var(--seat-card-w) * 0.1)' }}
       >
         {hand.map((card, cardIndex) => (
           <CardSlot
@@ -135,24 +149,28 @@ export const PokerTable: React.FC<PokerTableProps> = ({
           />
         ))}
         {seatIndex === 0 && (
-          <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[11px] font-medium text-emerald-300 whitespace-nowrap">
+          <span
+            style={{ fontSize: 'calc(var(--seat-card-w) * 0.34)' }}
+            className="absolute -top-4 left-1/2 -translate-x-1/2 font-medium text-emerald-300 whitespace-nowrap"
+          >
             You
           </span>
         )}
 
         {equity?.[seatIndex] && (
           <div
-            className={`absolute left-1/2 -translate-x-1/2 bg-neutral-900/90 px-3 py-1 rounded text-center whitespace-nowrap leading-tight ${
+            style={{ fontSize: 'calc(var(--seat-card-w) * 0.36)' }}
+            className={`absolute left-1/2 -translate-x-1/2 bg-neutral-900/90 px-2 py-0.5 rounded text-center whitespace-nowrap leading-tight ${
               READOUT_ABOVE[seatIndex] ? 'bottom-full mb-1' : 'top-full mt-1'
             }`}
           >
-            <div className="text-[13px]">
+            <div>
               <span className="text-red-400">Win: </span>
               <span className="text-white font-medium">
                 {equity[seatIndex]!.win.toFixed(2)}%
               </span>
             </div>
-            <div className="text-[13px]">
+            <div>
               <span className="text-red-400">Tie: </span>
               <span className="text-white font-medium">
                 {equity[seatIndex]!.tie.toFixed(2)}%

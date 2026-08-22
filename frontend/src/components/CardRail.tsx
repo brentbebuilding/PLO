@@ -36,11 +36,13 @@ export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled }) =>
     used.some(c => c.rank === rank && c.suit === suit);
 
   return (
-    <div className="bg-black/30 rounded-lg p-2 inline-block">
+    <div className="bg-black/30 rounded-lg p-1.5 inline-block">
+      {/* Two suits per row while there is room; they wrap to their own rows
+          when there isn't, rather than forcing the page wider. */}
       {[0, 1].map(pairIndex => (
-        <div key={pairIndex} className="flex gap-2 mb-1 last:mb-0">
+        <div key={pairIndex} className="flex flex-wrap gap-1.5 mb-1 last:mb-0">
           {RAIL_SUITS.slice(pairIndex * 2, pairIndex * 2 + 2).map(suit => (
-            <div key={suit} className="flex gap-0.5">
+            <div key={suit} className="flex gap-px">
               {RAIL_RANKS.map(rank => {
                 const taken = isUsed(rank, suit);
                 return (
@@ -49,7 +51,11 @@ export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled }) =>
                     onClick={() => !taken && !disabled && onPick({ rank, suit })}
                     disabled={taken || disabled}
                     title={taken ? 'Already in play' : undefined}
-                    className={`w-8 h-11 rounded border text-white flex flex-col items-center justify-center leading-none transition-opacity ${
+                    style={{
+                      width: 'var(--rail-card-w)',
+                      height: 'calc(var(--rail-card-w) * 1.35)',
+                    }}
+                    className={`rounded border text-white flex flex-col items-center justify-center leading-none transition-opacity ${
                       SUIT_STYLE[suit]
                     } ${
                       taken
@@ -59,8 +65,13 @@ export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled }) =>
                         : 'hover:brightness-125 cursor-pointer'
                     }`}
                   >
-                    <span className="text-[11px]">{SUIT_PIP[suit]}</span>
-                    <span className="text-sm font-semibold">
+                    <span style={{ fontSize: 'calc(var(--rail-card-w) * 0.34)' }}>
+                      {SUIT_PIP[suit]}
+                    </span>
+                    <span
+                      className="font-semibold"
+                      style={{ fontSize: 'calc(var(--rail-card-w) * 0.44)' }}
+                    >
                       {rank === 'T' ? '10' : rank}
                     </span>
                   </button>
