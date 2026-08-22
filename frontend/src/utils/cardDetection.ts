@@ -25,12 +25,14 @@ import {
   matchSignature,
   matchSuitByColor,
   opponentSeat,
+  CARDS_PER_HAND,
 } from './glyphTemplates';
 import {
   BoardAnchor,
   CardRegion,
   findBoard,
   findCardRegions,
+  findHandRows,
   rankGlyphBounds,
   toAbsolute,
 } from './tableAnalysis';
@@ -98,7 +100,8 @@ export async function detectCards(
   // is evenly spaced and unoccluded, so they can be found without calibration.
   // Everything else is then measured against them, which is what makes a
   // calibration survive a screenshot taken at a different size.
-  const anchor = findBoard(findCardRegions(imageData));
+  const regions = findCardRegions(imageData);
+  const anchor = findBoard(regions);
   if (!anchor) {
     return emptyResult(
       'Could not find the community cards. Is the board visible in this screenshot?'
@@ -113,7 +116,23 @@ export async function detectCards(
     .filter(slot => slot.role !== 'board')
     .map(slot => readSeatSlot(imageData, slot, anchor, templates, suitSamples));
 
-  const readings = [...boardReadings, ...seatReadings];
+  // Hands shown in the client's hands panel. Read only when nothing has been
+  // calibrated by hand, so a user's own slots always take precedence.
+  const handReadings: SlotReading[] = [];
+  if (seatReadings.length === 0) {
+    findHandRows(regions, anchor).forEach((row, seatIndex) => {
+      row.forEach((card, cardIndex) => {
+        const reading = readBoardCard(imageData, card, cardIndex, templates);
+        handReadings.push({
+          ...reading,
+          role: seatIndex === 0 ? 'hero' : 'opponent',
+          index: seatIndex === 0 ? cardIndex : (seatIndex - 1) * CARDS_PER_HAND + cardIndex,
+        });
+      });
+    });
+  }
+
+  const readings = [...boardReadings, ...seatReadings, ...handReadings];
 
   const cardsFor = (role: SlotRole): Card[] =>
     readings

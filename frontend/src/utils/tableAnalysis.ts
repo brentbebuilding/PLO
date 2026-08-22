@@ -297,6 +297,50 @@ export function findBoard(regions: CardRegion[]): BoardAnchor | null {
   };
 }
 
+/**
+ * Rows of cards that are not the board — revealed hands.
+ *
+ * The hands panel draws each player's cards as separate upright thumbnails,
+ * which read far more reliably than the cards on the table itself: those are
+ * fanned in an arc, so the outer two are rotated and half-buried under the
+ * player's name plate.
+ *
+ * Returned largest-row-first. Which row belongs to whom isn't knowable from
+ * pixels alone, so callers should treat the assignment as a suggestion.
+ */
+export function findHandRows(
+  regions: CardRegion[],
+  board: BoardAnchor,
+  minCards = 2
+): CardRegion[][] {
+  const candidates = regions.filter(r => {
+    const aspect = r.width / r.height;
+    return (
+      !board.cards.includes(r) &&
+      r.height >= 20 &&
+      r.fill >= 0.45 &&
+      aspect >= 0.5 &&
+      aspect <= 1.0
+    );
+  });
+
+  const rows: CardRegion[][] = [];
+  for (const card of candidates) {
+    const row = rows.find(
+      r =>
+        Math.abs(r[0].y - card.y) < card.height * 0.35 &&
+        Math.abs(r[0].height - card.height) < card.height * 0.35
+    );
+    if (row) row.push(card);
+    else rows.push([card]);
+  }
+
+  return rows
+    .filter(r => r.length >= minCards)
+    .map(r => r.sort((a, b) => a.x - b.x))
+    .sort((a, b) => b.length - a.length);
+}
+
 /** A rectangle expressed in board units, so it survives a rescaled screenshot. */
 export interface RelativeRect {
   dx: number;
