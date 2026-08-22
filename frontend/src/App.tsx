@@ -1,543 +1,359 @@
-import { useState, useEffect } from 'react';
-import { Card as CardType, Rank, Suit } from './types';
-import {
-  PlayerHand,
-  Board,
-  CardSelector,
-  EquityDisplay,
-  ScreenshotReference,
-} from './components';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Card } from './types';
 import { calculateEquity, SimulationResult } from './utils/equity';
-import { Plus, Minus, RefreshCw, Trash2, Github, Type } from 'lucide-react';
+import { detectCards } from './utils/cardDetection';
+import { loadSlots, loadSuitSamples, loadTemplates } from './utils/glyphTemplates';
+import CardRail from './components/CardRail';
+import PokerTable, {
+  BOARD_SIZE,
+  CARDS_PER_SEAT,
+  SEAT_COUNT,
+  CardSlot,
+  SeatEquity,
+  SlotRef,
+  sameSlot,
+} from './components/PokerTable';
+import { Github, Loader2, RefreshCw, Upload } from 'lucide-react';
+
+const DEAD_CARD_SLOTS = 14;
 
 type Stage = 'preflop' | 'flop' | 'turn' | 'river';
 
-interface SelectionTarget {
-  type: 'player' | 'board';
-  playerIndex?: number;
-  cardIndex: number;
-}
-
-// Convert SimulationResult to EquityDisplay format
 interface DisplayResult {
-  player_index: number;
+  playerIndex: number;
   cards: string[];
-  win_percentage: number;
-  tie_percentage: number;
+  winPercentage: number;
+  tiePercentage: number;
   equity: number;
 }
 
+const emptySeats = () =>
+  Array.from({ length: SEAT_COUNT }, () =>
+    Array.from({ length: CARDS_PER_SEAT }, () => null as Card | null)
+  );
+
 function App() {
-  // State
-  const [numPlayers, setNumPlayers] = useState(2);
-  const [playerCards, setPlayerCards] = useState<(CardType | null)[][]>([
-    [null, null, null, null],
-    [null, null, null, null],
-  ]);
-  const [boardCards, setBoardCards] = useState<(CardType | null)[]>([
-    null,
-    null,
-    null,
-    null,
-    null,
-  ]);
-  const [stage, setStage] = useState<Stage>('preflop');
-  const [equityResult, setEquityResult] = useState<{
-    players: DisplayResult[];
-    stage: string;
-    simulations_run: number;
-  } | null>(null);
-  const [isCalculating, setIsCalculating] = useState(false);
-  const [selectorOpen, setSelectorOpen] = useState(false);
-  const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null);
+  const [seats, setSeats] = useState<(Card | null)[][]>(emptySeats);
+  const [board, setBoard] = useState<(Card | null)[]>(() =>
+    Array.from({ length: BOARD_SIZE }, () => null)
+  );
+  const [dead, setDead] = useState<(Card | null)[]>(() =>
+    Array.from({ length: DEAD_CARD_SLOTS }, () => null)
+  );
+
+  const [selected, setSelected] = useState<SlotRef | null>({ group: 0, index: 0 });
+  const [equity, setEquity] = useState<{ players: DisplayResult[]; stage: Stage } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [quickInput, setQuickInput] = useState({ hero: '', villain: '', board: '' });
-  const [showQuickInput, setShowQuickInput] = useState(false);
 
-  // Parse card string like "Ad Qc Jc 7s" into Card objects
-  const parseCardString = (input: string): CardType[] => {
-    const cards: CardType[] = [];
-    const validRanks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
-    const validSuits = ['d', 'c', 'h', 's'];
+  const [screenshot, setScreenshot] = useState<string | null>(null);
+  const [isReading, setIsReading] = useState(false);
+  const [readNote, setReadNote] = useState<string | null>(null);
 
-    // Remove extra spaces and split
-    const tokens = input.trim().toUpperCase().split(/\s+/);
+  const usedCards = useMemo(
+    () =>
+      [...seats.flat(), ...board, ...dead].filter((c): c is Card => c !== null),
+    [seats, board, dead]
+  );
 
-    for (const token of tokens) {
-      if (token.length >= 2) {
-        let rank = token[0];
-        let suit = token[1].toLowerCase();
+  const seatEquity = useMemo(() => {
+    const out: (SeatEquity | null)[] = Array.from({ length: SEAT_COUNT }, () => null);
+    equity?.players.forEach(p => {
+      out[p.playerIndex] = { win: p.winPercentage, tie: p.tiePercentage };
+    });
+    return out;
+  }, [equity]);
 
-        // Handle "10" as "T"
-        if (token.startsWith('10')) {
-          rank = 'T';
-          suit = token[2]?.toLowerCase() || '';
-        }
+  const stage: Stage = useMemo(() => {
+    const n = board.filter(Boolean).length;
+    if (n === 0) return 'preflop';
+    if (n <= 3) return 'flop';
+    if (n === 4) return 'turn';
+    return 'river';
+  }, [board]);
 
-        if (validRanks.includes(rank) && validSuits.includes(suit)) {
-          cards.push({ rank: rank as Rank, suit: suit as Suit });
-        }
+  /** Recalculate whenever the cards change. */
+  useEffect(() => {
+    const complete = seats.filter(hand => hand.every(c => c !== null)) as Card[][];
+    if (complete.length < 2) {
+      setEquity(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      try {
+        const result: SimulationResult = calculateEquity(
+          complete,
+          board.filter((c): c is Card => c !== null),
+          10000
+        );
+        // Map back to seat numbers so the labels match the table.
+        const seatOf = seats
+          .map((hand, i) => (hand.every(c => c !== null) ? i : -1))
+          .filter(i => i >= 0);
+        setEquity({
+          stage: result.stage as Stage,
+          players: result.players.map((p, i) => ({
+            playerIndex: seatOf[i],
+            cards: p.cards,
+            winPercentage: p.winPercentage,
+            tiePercentage: p.tiePercentage,
+            equity: p.equity,
+          })),
+        });
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Could not calculate equity');
       }
-    }
+    }, 10);
+    return () => clearTimeout(timer);
+  }, [seats, board]);
 
-    return cards;
-  };
+  /** Place a card into the selected slot, then step to the next one. */
+  const placeCard = (card: Card) => {
+    if (!selected) return;
 
-  // Apply quick input cards
-  const applyQuickInput = () => {
-    const heroCards = parseCardString(quickInput.hero);
-    const villainCards = parseCardString(quickInput.villain);
-    const boardCardsInput = parseCardString(quickInput.board);
-
-    // Update hero cards
-    if (heroCards.length > 0) {
-      const newPlayerCards = [...playerCards];
-      heroCards.forEach((card, idx) => {
-        if (idx < 4) {
-          newPlayerCards[0][idx] = card;
-        }
-      });
-      setPlayerCards(newPlayerCards);
-    }
-
-    // Update villain cards
-    if (villainCards.length > 0 && numPlayers >= 2) {
-      const newPlayerCards = [...playerCards];
-      villainCards.forEach((card, idx) => {
-        if (idx < 4) {
-          newPlayerCards[1][idx] = card;
-        }
-      });
-      setPlayerCards(newPlayerCards);
-    }
-
-    // Update board cards
-    if (boardCardsInput.length > 0) {
-      const newBoardCards = [...boardCards];
-      boardCardsInput.forEach((card, idx) => {
-        if (idx < 5) {
-          newBoardCards[idx] = card;
-        }
-      });
-      setBoardCards(newBoardCards);
-    }
-
-    // Clear inputs after applying
-    setQuickInput({ hero: '', villain: '', board: '' });
-  };
-
-  // Get all used cards
-  const usedCards: (CardType | null)[] = [
-    ...playerCards.flat(),
-    ...boardCards,
-  ];
-
-  // Determine stage from board cards
-  useEffect(() => {
-    const boardCount = boardCards.filter((c) => c !== null).length;
-    if (boardCount === 0) setStage('preflop');
-    else if (boardCount <= 3) setStage('flop');
-    else if (boardCount === 4) setStage('turn');
-    else setStage('river');
-  }, [boardCards]);
-
-  // Auto-calculate equity when cards change
-  useEffect(() => {
-    const canCalculate = playerCards.every((hand) =>
-      hand.every((card) => card !== null)
-    );
-
-    if (canCalculate) {
-      handleCalculate();
+    if (selected.group === 'board') {
+      setBoard(prev => prev.map((c, i) => (i === selected.index ? card : c)));
+    } else if (selected.group === 'dead') {
+      setDead(prev => prev.map((c, i) => (i === selected.index ? card : c)));
     } else {
-      setEquityResult(null);
+      const seat = selected.group;
+      setSeats(prev =>
+        prev.map((hand, s) =>
+          s === seat ? hand.map((c, i) => (i === selected.index ? card : c)) : hand
+        )
+      );
     }
-  }, [playerCards, boardCards]);
+    setSelected(advance(selected));
+  };
 
-  // Add/remove players
-  const addPlayer = () => {
-    if (numPlayers < 6) {
-      setNumPlayers(numPlayers + 1);
-      setPlayerCards([...playerCards, [null, null, null, null]]);
+  /** Clear the selected slot rather than replacing it. */
+  const clearSlot = () => {
+    if (!selected) return;
+    if (selected.group === 'board') {
+      setBoard(prev => prev.map((c, i) => (i === selected.index ? null : c)));
+    } else if (selected.group === 'dead') {
+      setDead(prev => prev.map((c, i) => (i === selected.index ? null : c)));
+    } else {
+      const seat = selected.group;
+      setSeats(prev =>
+        prev.map((hand, s) =>
+          s === seat ? hand.map((c, i) => (i === selected.index ? null : c)) : hand
+        )
+      );
     }
   };
 
-  const removePlayer = () => {
-    if (numPlayers > 2) {
-      setNumPlayers(numPlayers - 1);
-      setPlayerCards(playerCards.slice(0, -1));
-    }
-  };
-
-  // Handle card selection
-  const openCardSelector = (target: SelectionTarget) => {
-    setSelectionTarget(target);
-    setSelectorOpen(true);
-  };
-
-  const handleCardSelect = (card: CardType) => {
-    if (!selectionTarget) return;
-
-    if (selectionTarget.type === 'player' && selectionTarget.playerIndex !== undefined) {
-      const newPlayerCards = [...playerCards];
-      newPlayerCards[selectionTarget.playerIndex] = [
-        ...newPlayerCards[selectionTarget.playerIndex],
-      ];
-      newPlayerCards[selectionTarget.playerIndex][selectionTarget.cardIndex] = card;
-      setPlayerCards(newPlayerCards);
-    } else if (selectionTarget.type === 'board') {
-      const newBoardCards = [...boardCards];
-      newBoardCards[selectionTarget.cardIndex] = card;
-      setBoardCards(newBoardCards);
-    }
-
-    setSelectionTarget(null);
-  };
-
-  // Calculate equity (now runs locally in the browser)
-  const handleCalculate = async () => {
+  const newHand = () => {
+    setSeats(emptySeats());
+    setBoard(Array.from({ length: BOARD_SIZE }, () => null));
+    setDead(Array.from({ length: DEAD_CARD_SLOTS }, () => null));
+    setSelected({ group: 0, index: 0 });
+    setEquity(null);
+    setScreenshot(null);
+    setReadNote(null);
     setError(null);
-    setIsCalculating(true);
+  };
+
+  /** Read a dropped screenshot into the table. */
+  const readScreenshot = useCallback(async (src: string) => {
+    setScreenshot(src);
+    setIsReading(true);
+    setReadNote(null);
+    setError(null);
 
     try {
-      const validPlayers = playerCards.filter((hand) =>
-        hand.every((c) => c !== null)
-      ) as CardType[][];
+      const result = await detectCards(src, loadSlots(), loadTemplates(), loadSuitSamples());
 
-      if (validPlayers.length < 2) {
-        setError('Need at least 2 players with complete hands');
-        setIsCalculating(false);
-        return;
-      }
-
-      const board = boardCards.filter((c) => c !== null) as CardType[];
-
-      // Run calculation in a setTimeout to allow UI to update
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      const result: SimulationResult = calculateEquity(validPlayers, board, 10000);
-
-      // Convert to display format
-      setEquityResult({
-        stage: result.stage,
-        simulations_run: result.simulationsRun,
-        players: result.players.map(p => ({
-          player_index: p.playerIndex,
-          cards: p.cards,
-          win_percentage: p.winPercentage,
-          tie_percentage: p.tiePercentage,
-          equity: p.equity,
-        })),
+      const nextSeats = emptySeats();
+      // The user always takes the top seat, whichever hand was theirs.
+      result.hero.slice(0, CARDS_PER_SEAT).forEach((c, i) => (nextSeats[0][i] = c));
+      result.villains.slice(0, SEAT_COUNT - 1).forEach((hand, v) => {
+        hand.slice(0, CARDS_PER_SEAT).forEach((c, i) => (nextSeats[v + 1][i] = c));
       });
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to calculate equity';
-      setError(errorMessage);
+
+      const nextBoard: (Card | null)[] = Array.from({ length: BOARD_SIZE }, () => null);
+      result.board.slice(0, BOARD_SIZE).forEach((c, i) => (nextBoard[i] = c));
+
+      setSeats(nextSeats);
+      setBoard(nextBoard);
+      setReadNote(result.message ?? null);
+      if (!result.success) setError(result.message ?? 'Nothing could be read.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not read that screenshot.');
     } finally {
-      setIsCalculating(false);
+      setIsReading(false);
     }
-  };
+  }, []);
 
-  // Clear all
-  const handleClear = () => {
-    setPlayerCards(Array(numPlayers).fill(null).map(() => [null, null, null, null]));
-    setBoardCards([null, null, null, null, null]);
-    setEquityResult(null);
-    setError(null);
-  };
+  const handleFile = useCallback(
+    (file: File) => {
+      if (!file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = e => readScreenshot(e.target?.result as string);
+      reader.readAsDataURL(file);
+    },
+    [readScreenshot]
+  );
 
-  // Handle cards detected from screenshot
-  const handleCardsDetected = (result: { playerCards: CardType[][]; boardCards: CardType[] }) => {
-    // A showdown can reveal more hands than there are seats configured, so grow
-    // to fit rather than silently dropping the extras.
-    const MAX_PLAYERS = 6;
-    const detectedCount = Math.min(result.playerCards.length, MAX_PLAYERS);
-    const seatCount = Math.max(numPlayers, detectedCount);
-
-    const newPlayerCards = Array.from({ length: seatCount }, (_, i) =>
-      playerCards[i] ? [...playerCards[i]] : [null, null, null, null]
-    );
-
-    result.playerCards.slice(0, MAX_PLAYERS).forEach((hand, playerIdx) => {
-      hand.forEach((card, cardIdx) => {
-        if (cardIdx < 4) {
-          newPlayerCards[playerIdx][cardIdx] = card;
+  // Paste anywhere on the page drops a screenshot in.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      for (const item of e.clipboardData?.items ?? []) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) handleFile(file);
+          break;
         }
-      });
-    });
-
-    if (seatCount !== numPlayers) {
-      setNumPlayers(seatCount);
-    }
-    setPlayerCards(newPlayerCards);
-
-    // Update board cards with detected cards
-    const newBoardCards = [...boardCards];
-    result.boardCards.forEach((card, idx) => {
-      if (idx < 5) {
-        newBoardCards[idx] = card;
       }
-    });
-    setBoardCards(newBoardCards);
-  };
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [handleFile]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-poker-felt to-gray-900">
-      {/* Header */}
-      <header className="bg-black/30 border-b border-gray-800 px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-white">
-            PLO Odds Calculator
-          </h1>
-          <div className="flex items-center gap-4">
-            <span className="text-gray-400 text-sm hidden sm:inline">
-              Pot Limit Omaha Equity Calculator
-            </span>
-            <a
-              href="https://github.com/brentbebuilding/PLO"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-gray-400 hover:text-white transition-colors"
-              title="View on GitHub"
-            >
-              <Github size={20} />
-            </a>
-          </div>
+    <div className="min-h-screen bg-neutral-950 text-white">
+      <header className="px-6 py-3 flex items-center justify-between border-b border-neutral-800">
+        <h1 className="text-xl font-bold">Omaha Odds Calculator</h1>
+        <div className="flex items-center gap-3 text-sm text-neutral-400">
+          <span className="hidden sm:inline">Pot Limit Omaha equity, in your browser</span>
+          <a
+            href="https://github.com/brentbebuilding/PLO"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-neutral-500 hover:text-white"
+          >
+            <Github size={18} />
+          </a>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left column - Players and Board */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Screenshot Reference */}
-            <ScreenshotReference
-              numPlayers={numPlayers}
-              onCardsDetected={handleCardsDetected}
-            />
+      <main className="bg-[#4a1414] px-4 py-4">
+        <div className="max-w-6xl mx-auto">
+          {/* Deck and screenshot controls */}
+          <div className="flex flex-wrap gap-4 items-start justify-between mb-4">
+            <CardRail used={usedCards} onPick={placeCard} disabled={!selected} />
 
-            {/* Quick Text Input */}
-            <div className="bg-gray-800/50 rounded-xl p-4">
-              <button
-                onClick={() => setShowQuickInput(!showQuickInput)}
-                className="flex items-center gap-2 text-white font-medium w-full"
+            <div className="flex flex-col gap-2 min-w-[220px] flex-1 max-w-xs">
+              <div
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => {
+                  e.preventDefault();
+                  if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]);
+                }}
+                onClick={() => document.getElementById('shot-input')?.click()}
+                className="border-2 border-dashed border-neutral-500 hover:border-neutral-300 rounded-lg p-3 text-center cursor-pointer bg-black/20 transition-colors"
               >
-                <Type size={18} />
-                Quick Card Entry
-                <span className="text-gray-400 text-sm ml-2">
-                  {showQuickInput ? '(click to hide)' : '(type cards like "Ad Qc Jc 7s")'}
-                </span>
-              </button>
+                {isReading ? (
+                  <div className="flex items-center justify-center gap-2 text-sm text-neutral-300 py-2">
+                    <Loader2 size={16} className="animate-spin" />
+                    Reading…
+                  </div>
+                ) : screenshot ? (
+                  <img
+                    src={screenshot}
+                    alt="Screenshot"
+                    className="max-h-20 mx-auto rounded object-contain"
+                  />
+                ) : (
+                  <>
+                    <Upload className="mx-auto text-neutral-400 mb-1" size={18} />
+                    <div className="text-xs text-neutral-300">
+                      Drop a screenshot here
+                    </div>
+                    <div className="text-[11px] text-neutral-500">or paste it anywhere</div>
+                  </>
+                )}
+                <input
+                  id="shot-input"
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])}
+                />
+              </div>
 
-              {showQuickInput && (
-                <div className="mt-4 space-y-3">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-gray-400 text-sm mb-1">Hero (4 cards)</label>
-                      <input
-                        type="text"
-                        value={quickInput.hero}
-                        onChange={(e) => setQuickInput({ ...quickInput, hero: e.target.value })}
-                        placeholder="Ad Qc Jc 7s"
-                        className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-gray-400 text-sm mb-1">Villain (4 cards)</label>
-                      <input
-                        type="text"
-                        value={quickInput.villain}
-                        onChange={(e) => setQuickInput({ ...quickInput, villain: e.target.value })}
-                        placeholder="As Ks Ts 9c"
-                        className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-gray-400 text-sm mb-1">Board (0-5 cards)</label>
-                      <input
-                        type="text"
-                        value={quickInput.board}
-                        onChange={(e) => setQuickInput({ ...quickInput, board: e.target.value })}
-                        placeholder="6s 7s 6c 3d Qs"
-                        className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <p className="text-gray-500 text-xs">
-                      Format: Rank + Suit (A=Ace, K=King, Q=Queen, J=Jack, T=10, d=♦, c=♣, h=♥, s=♠)
-                    </p>
-                    <button
-                      onClick={applyQuickInput}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium"
-                    >
-                      Apply Cards
-                    </button>
-                  </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={newHand}
+                  className="flex-1 px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700 text-sm font-medium flex items-center justify-center gap-2"
+                >
+                  <RefreshCw size={14} />
+                  New Hand
+                </button>
+                <button
+                  onClick={clearSlot}
+                  disabled={!selected}
+                  className="px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-sm"
+                  title="Empty the selected slot"
+                >
+                  Clear
+                </button>
+              </div>
+
+              {readNote && !error && (
+                <div className="text-[11px] text-neutral-400">{readNote}</div>
+              )}
+              {error && (
+                <div className="text-[11px] text-red-300 bg-red-950/50 rounded px-2 py-1">
+                  {error}
+                </div>
+              )}
+
+              {equity && (
+                <div className="text-[11px] text-neutral-400">
+                  10,000 simulations · {stage}
                 </div>
               )}
             </div>
-
-            {/* Player controls */}
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-medium text-white">
-                Players ({numPlayers})
-              </h2>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={removePlayer}
-                  disabled={numPlayers <= 2}
-                  className="p-2 rounded-lg bg-gray-700 text-white disabled:opacity-50 hover:bg-gray-600"
-                  title="Remove player"
-                >
-                  <Minus size={16} />
-                </button>
-                <button
-                  onClick={addPlayer}
-                  disabled={numPlayers >= 6}
-                  className="p-2 rounded-lg bg-gray-700 text-white disabled:opacity-50 hover:bg-gray-600"
-                  title="Add player"
-                >
-                  <Plus size={16} />
-                </button>
-                <button
-                  onClick={handleClear}
-                  className="p-2 rounded-lg bg-red-700 text-white hover:bg-red-600 ml-2"
-                  title="Clear all cards"
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            </div>
-
-            {/* Player hands */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {playerCards.map((cards, playerIdx) => (
-                <PlayerHand
-                  key={playerIdx}
-                  playerIndex={playerIdx}
-                  cards={cards}
-                  equity={equityResult?.players[playerIdx]?.equity}
-                  winPercentage={equityResult?.players[playerIdx]?.win_percentage}
-                  tiePercentage={equityResult?.players[playerIdx]?.tie_percentage}
-                  onCardClick={(cardIdx) =>
-                    openCardSelector({
-                      type: 'player',
-                      playerIndex: playerIdx,
-                      cardIndex: cardIdx,
-                    })
-                  }
-                  isHero={playerIdx === 0}
-                />
-              ))}
-            </div>
-
-            {/* Board */}
-            <Board
-              cards={boardCards}
-              onCardClick={(cardIdx) =>
-                openCardSelector({ type: 'board', cardIndex: cardIdx })
-              }
-              stage={stage}
-            />
-
-            {/* Calculate button */}
-            <button
-              onClick={handleCalculate}
-              disabled={isCalculating}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white font-medium rounded-lg flex items-center justify-center gap-2 transition-colors"
-            >
-              {isCalculating ? (
-                <>
-                  <RefreshCw className="animate-spin" size={20} />
-                  Calculating...
-                </>
-              ) : (
-                <>
-                  <RefreshCw size={20} />
-                  Calculate Equity
-                </>
-              )}
-            </button>
-
-            {/* Error display */}
-            {error && (
-              <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-3 rounded-lg">
-                {error}
-              </div>
-            )}
           </div>
 
-          {/* Right column - Results */}
-          <div className="space-y-6">
-            {equityResult ? (
-              <EquityDisplay
-                results={equityResult.players}
-                stage={equityResult.stage}
-                simulations={equityResult.simulations_run}
-              />
-            ) : (
-              <div className="bg-gray-800/30 rounded-xl p-6 text-center">
-                <p className="text-gray-400">
-                  Select cards for all players to calculate equity
-                </p>
-              </div>
-            )}
+          <PokerTable
+            seats={seats}
+            board={board}
+            selected={selected}
+            onSelect={setSelected}
+            equity={seatEquity}
+          />
 
-            {/* Instructions */}
-            <div className="bg-gray-800/30 rounded-xl p-6">
-              <h3 className="text-white font-medium mb-3">How to use</h3>
-              <ol className="text-gray-400 text-sm space-y-2 list-decimal list-inside">
-                <li>Click on card slots to select cards for each player</li>
-                <li>Each player needs 4 hole cards (PLO)</li>
-                <li>Add community cards for flop/turn/river</li>
-                <li>Equity updates automatically as you add cards</li>
-              </ol>
-            </div>
-
-            {/* PLO Rules */}
-            <div className="bg-gray-800/30 rounded-xl p-6">
-              <h3 className="text-white font-medium mb-3">PLO Rules</h3>
-              <p className="text-gray-400 text-sm">
-                In Pot Limit Omaha, each player receives 4 hole cards and must
-                use exactly 2 of them combined with exactly 3 community cards
-                to make the best 5-card hand.
-              </p>
-            </div>
-
-            {/* Tech info */}
-            <div className="bg-gray-800/30 rounded-xl p-6">
-              <h3 className="text-white font-medium mb-3">About</h3>
-              <p className="text-gray-400 text-sm">
-                This calculator runs entirely in your browser using Monte Carlo
-                simulation with 10,000 iterations. No data is sent to any server.
-              </p>
+          <div className="mt-4">
+            <h2 className="text-sm font-semibold mb-2">Dead Cards</h2>
+            <div className="flex gap-1.5 flex-wrap">
+              {dead.map((card, i) => (
+                <CardSlot
+                  key={i}
+                  card={card}
+                  size="small"
+                  selected={sameSlot(selected, { group: 'dead', index: i })}
+                  onClick={() => setSelected({ group: 'dead', index: i })}
+                />
+              ))}
             </div>
           </div>
         </div>
       </main>
 
-      {/* Footer */}
-      <footer className="bg-black/30 border-t border-gray-800 px-6 py-4 mt-8">
-        <div className="max-w-6xl mx-auto text-center text-gray-500 text-sm">
-          PLO Odds Calculator - Built with React & TypeScript
-        </div>
-        {/* Build marker — confirms at a glance which deploy is live. */}
-        <div className="max-w-6xl mx-auto text-center mt-2">
-          <span className="inline-block px-3 py-1 rounded-full bg-green-600 text-white text-base font-bold">
-            VERSION 4.1 — finds your seat
-          </span>
-        </div>
+      <footer className="px-6 py-3 text-center text-neutral-600 text-xs">
+        Runs entirely in your browser · nothing is uploaded · VERSION 5.0
       </footer>
-
-      {/* Card Selector Modal */}
-      <CardSelector
-        isOpen={selectorOpen}
-        onClose={() => setSelectorOpen(false)}
-        onSelect={handleCardSelect}
-        usedCards={usedCards}
-      />
     </div>
   );
+}
+
+/** Step to the next slot, so a hand can be entered without re-clicking. */
+function advance(slot: SlotRef): SlotRef {
+  if (slot.group === 'board') {
+    return { group: 'board', index: Math.min(slot.index + 1, BOARD_SIZE - 1) };
+  }
+  if (slot.group === 'dead') {
+    return { group: 'dead', index: Math.min(slot.index + 1, DEAD_CARD_SLOTS - 1) };
+  }
+  if (slot.index + 1 < CARDS_PER_SEAT) {
+    return { group: slot.group, index: slot.index + 1 };
+  }
+  // End of a hand: move to the board after the user's own, else the next seat.
+  if (slot.group === 0) return { group: 'board', index: 0 };
+  return { group: Math.min(slot.group + 1, SEAT_COUNT - 1), index: 0 };
 }
 
 export default App;
