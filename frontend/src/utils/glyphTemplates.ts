@@ -13,9 +13,17 @@
 
 import { Card, Rank, Suit } from '../types';
 
-/** Normalised glyph dimensions. Small enough to compare cheaply, big enough to tell 6 from 8. */
-export const GLYPH_W = 16;
-export const GLYPH_H = 20;
+/**
+ * Normalised glyph dimensions.
+ *
+ * Chosen by measurement, not taste. At 16x20 an 8 and a Q are mostly the same
+ * rectangular outline and the metric could not separate them — two clean 8s
+ * scored 0.73 against each other while an 8 scored 0.85 against a Q. Raising to
+ * 24x32 gives the distinguishing strokes enough pixels to matter: the worst
+ * same-rank pair reaches 0.91 and the best mismatched pair falls to 0.76.
+ */
+export const GLYPH_W = 24;
+export const GLYPH_H = 32;
 
 export interface Signature {
   w: number;
@@ -125,7 +133,58 @@ export function extractSignature(
 
   if (inkCount < 6 || maxX < minX || maxY < minY) return null;
 
-  return fitToBox(ink, w, minX, minY, maxX, maxY);
+  // Cards print the rank above the suit pip, and a crop generous enough to hold
+  // every rank catches the top of the pip too. Keep only the ink above the first
+  // blank row, so "10" over a club doesn't sign differently from "10" over a
+  // heart.
+  const clippedMaxY = clipAtFirstGap(ink, w, minX, maxX, minY, maxY);
+
+  // Re-tighten horizontally: the pip can be wider than the rank it sat under.
+  let clippedMinX = maxX;
+  let clippedMaxX = minX;
+  for (let y = minY; y <= clippedMaxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      if (ink[y * w + x] > 0) {
+        if (x < clippedMinX) clippedMinX = x;
+        if (x > clippedMaxX) clippedMaxX = x;
+      }
+    }
+  }
+  if (clippedMaxX < clippedMinX) return null;
+
+  return fitToBox(ink, w, clippedMinX, minY, clippedMaxX, clippedMaxY);
+}
+
+/**
+ * Last row of the topmost blob of ink.
+ *
+ * Walks down from the first inked row and stops at the first fully blank row
+ * that has more ink below it. With no such gap the region is returned intact.
+ */
+function clipAtFirstGap(
+  ink: Uint8Array,
+  stride: number,
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number
+): number {
+  const rowHasInk = (y: number) => {
+    for (let x = minX; x <= maxX; x++) {
+      if (ink[y * stride + x] > 0) return true;
+    }
+    return false;
+  };
+
+  for (let y = minY; y <= maxY; y++) {
+    if (rowHasInk(y)) continue;
+    // Blank row — is this a true separator, or just the end of the glyph?
+    for (let below = y + 1; below <= maxY; below++) {
+      if (rowHasInk(below)) return y - 1;
+    }
+    return y - 1;
+  }
+  return maxY;
 }
 
 export interface InkColor {
@@ -334,7 +393,35 @@ function fitToBox(
     }
   }
 
-  return { w: GLYPH_W, h: GLYPH_H, data: out };
+  // Soften before storing. The same character rendered at two scales normalises
+  // to strokes that can sit a pixel apart, and on a thin vertical stroke that
+  // misalignment wrecks the correlation — two clean 8s scored 0.73 unsoftened,
+  // 0.92 softened. Blurring here rather than at compare time means templates are
+  // stored ready to use.
+  return { w: GLYPH_W, h: GLYPH_H, data: soften(out, GLYPH_W, GLYPH_H) };
+}
+
+/** 3x3 weighted average — a cheap stand-in for a Gaussian at this size. */
+function soften(data: number[], w: number, h: number): number[] {
+  const out = new Array<number>(w * h).fill(0);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0;
+      let weight = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const yy = y + dy;
+          const xx = x + dx;
+          if (yy < 0 || yy >= h || xx < 0 || xx >= w) continue;
+          const k = dx === 0 && dy === 0 ? 4 : dx === 0 || dy === 0 ? 2 : 1;
+          sum += data[yy * w + xx] * k;
+          weight += k;
+        }
+      }
+      out[y * w + x] = weight > 0 ? sum / weight : 0;
+    }
+  }
+  return out;
 }
 
 /**
@@ -410,8 +497,8 @@ export function matchSignature(
 // Persistence
 // ---------------------------------------------------------------------------
 
-const TEMPLATE_KEY = 'plo_glyph_templates_v1';
-const SLOTS_KEY = 'plo_card_slots_v1';
+const TEMPLATE_KEY = 'plo_glyph_templates_v2';
+const SLOTS_KEY = 'plo_card_slots_v2';
 const SUIT_SAMPLES_KEY = 'plo_suit_samples_v1';
 
 /** A colour the user confirmed belongs to a given suit. */
@@ -436,20 +523,26 @@ export const CARDS_PER_HAND = 4;
 /**
  * A card position on the table, captured once during calibration.
  *
- * Poker clients draw cards into fixed slots — the flop always lands in the same
- * three places — so knowing the slots removes the need to hunt for cards in the
- * image, and tells us whose card it is without guessing from position.
+ * Stored in board units — offsets and sizes measured against the community
+ * cards, not the image. Image fractions were the original design and they
+ * broke on the second screenshot: framing the table differently moves every
+ * absolute coordinate. Board-relative ones held to within 2% across two
+ * screenshots at 1014px and 1158px wide.
  *
- * Stored as fractions of the image so a different window size still lines up.
+ * Board slots are not stored at all — the community cards are found directly.
  */
 export interface CardSlot {
   role: SlotRole;
   /** Position within the role, left to right. */
   index: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  /** Offset from the left edge of the board, in board-card widths. */
+  dx: number;
+  /** Offset from the top of the board row, in board-card heights. */
+  dy: number;
+  /** Width, in board-card widths. */
+  dw: number;
+  /** Height, in board-card heights. */
+  dh: number;
 }
 
 export function loadTemplates(): GlyphTemplate[] {

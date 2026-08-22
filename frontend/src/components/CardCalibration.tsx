@@ -4,6 +4,13 @@ import { Rank, Suit } from '../types';
 import { RANKS, SUITS, SUIT_SYMBOLS } from '../utils/cards';
 import { inspectRegion, loadImageData } from '../utils/cardDetection';
 import {
+  BoardAnchor,
+  findBoard,
+  findCardRegions,
+  rankGlyphBounds,
+  toRelative,
+} from '../utils/tableAnalysis';
+import {
   Bounds,
   CardSlot,
   GlyphTemplate,
@@ -21,6 +28,7 @@ import {
   clearSuitSamples,
   clearTemplates,
   extractBackgroundColor,
+  extractSignature,
   loadSlots,
   loadSuitSamples,
   loadTemplates,
@@ -36,7 +44,8 @@ interface CardCalibrationProps {
   onClose?: () => void;
 }
 
-const ROLE_ORDER: SlotRole[] = ['board', 'hero', 'opponent'];
+/** Roles that still need marking by hand. The board finds itself. */
+const ROLE_ORDER: SlotRole[] = ['hero', 'opponent'];
 
 const ROLE_LABEL: Record<SlotRole, string> = {
   hero: 'Your hand',
@@ -71,10 +80,15 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
   const [slots, setSlots] = useState<CardSlot[]>(() => loadSlots());
   const [templates, setTemplates] = useState<GlyphTemplate[]>(() => loadTemplates());
   const [suitSamples, setSuitSamples] = useState<SuitSample[]>(() => loadSuitSamples());
+  const [anchor, setAnchor] = useState<BoardAnchor | null>(null);
   const [target, setTarget] = useState<{ role: SlotRole; index: number }>({
-    role: 'board',
+    role: 'hero',
     index: 0,
   });
+  /** Glyphs lifted from the auto-detected board, awaiting a rank label. */
+  const [boardGlyphs, setBoardGlyphs] = useState<
+    { suit: Suit; signature: Signature }[]
+  >([]);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [pending, setPending] = useState<PendingRegion | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +104,25 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
       setPending(null);
       setError(null);
       try {
-        setImageData(await loadImageData(src));
+        const decoded = await loadImageData(src);
+        setImageData(decoded);
+        const found = findBoard(findCardRegions(decoded));
+        setAnchor(found);
+        setBoardGlyphs(
+          found
+            ? found.cards
+                .map(card => ({
+                  suit: card.suit,
+                  signature: extractSignature(decoded, rankGlyphBounds(card)),
+                }))
+                .filter((g): g is { suit: Suit; signature: Signature } => g.signature !== null)
+            : []
+        );
+        setError(
+          found
+            ? null
+            : 'Could not find the community cards in this screenshot. Positions are measured against them, so pick one with the board visible.'
+        );
       } catch {
         setError('Could not read that image.');
       }
@@ -195,14 +227,17 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
    */
   const commit = (rank: Rank, suit: Suit) => {
     if (!pending || !pending.signature || !imageData) return;
+    if (!anchor) {
+      setError('Cannot place this without the board in view.');
+      return;
+    }
 
+    // Stored against the board rather than the image, so the position still
+    // holds in a screenshot taken at a different size.
     const slot: CardSlot = {
       role: target.role,
       index: target.index,
-      x: pending.bounds.x / imageData.width,
-      y: pending.bounds.y / imageData.height,
-      width: pending.bounds.width / imageData.width,
-      height: pending.bounds.height / imageData.height,
+      ...toRelative(pending.bounds, anchor),
     };
 
     setSlots(addSlot(slots, slot));
@@ -219,6 +254,21 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
 
     setPending(null);
     advance();
+  };
+
+  /**
+   * Label one of the auto-detected board cards.
+   *
+   * Faster than dragging, and more reliable: the crop comes from the detector
+   * itself, so the template is built from exactly the pixels a real read will
+   * see. The suit is already known from the card's face colour.
+   */
+  const teachBoardGlyph = (glyphIndex: number, rank: Rank) => {
+    const glyph = boardGlyphs[glyphIndex];
+    if (!glyph) return;
+    setTemplates(
+      addTemplate(templates, { rank, suit: glyph.suit, signature: glyph.signature })
+    );
   };
 
   /** Move to the next slot that still needs capturing. */
@@ -239,7 +289,7 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
     setSlots([]);
     setTemplates([]);
     setSuitSamples([]);
-    setTarget({ role: 'board', index: 0 });
+    setTarget({ role: 'hero', index: 0 });
     setPending(null);
   };
 
@@ -293,10 +343,15 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
       </div>
 
       <p className="text-gray-400 text-sm">
-        Drag a box around the <strong className="text-gray-200">rank character</strong> of each
-        card — the A, K, 7 and so on. Keep the box{' '}
-        <strong className="text-gray-200">inside the card</strong>: its edges sample the card
-        colour, which is how the suit is read. You only do this once.
+        Drop in a screenshot and the board is found automatically — just pick the rank
+        under each card it shows you. Suits come from the card colours, so there is
+        nothing to teach there. Load a few screenshots to cover all 13 ranks.
+        <br />
+        <span className="text-gray-500">
+          Hole cards still need marking by hand: drag a box around the rank character on
+          each, keeping the box inside the card. Positions are stored relative to the
+          board, so they carry over to screenshots at other sizes.
+        </span>
       </p>
 
       {!preview ? (
@@ -334,6 +389,44 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
               {describeTarget(target.role, target.index)}
             </span>
           </div>
+
+          {boardGlyphs.length > 0 && (
+            <div className="bg-gray-900/60 rounded-lg p-3 space-y-2">
+              <div className="text-green-400 text-sm font-medium">
+                Found the board — {boardGlyphs.length} cards. Tell it what each rank is:
+              </div>
+              <div className="flex gap-3 flex-wrap">
+                {boardGlyphs.map((glyph, i) => (
+                  <div key={i} className="flex flex-col items-center gap-1">
+                    <img
+                      src={signatureToDataUrl(glyph.signature, 2)}
+                      alt={'Board glyph ' + (i + 1)}
+                      className="rounded border border-gray-600"
+                    />
+                    <span className={'text-lg ' + suitClass(glyph.suit)}>
+                      {SUIT_SYMBOLS[glyph.suit]}
+                    </span>
+                    <select
+                      onChange={e => e.target.value && teachBoardGlyph(i, e.target.value as Rank)}
+                      defaultValue=""
+                      className="bg-gray-700 text-white text-sm rounded px-1 py-1"
+                    >
+                      <option value="">rank?</option>
+                      {RANKS.map(r => (
+                        <option key={r} value={r}>
+                          {r === 'T' ? '10' : r}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              <div className="text-gray-500 text-xs">
+                Suits come from the card colours automatically. Load a few different
+                screenshots to cover all 13 ranks.
+              </div>
+            </div>
+          )}
 
           <div className="relative inline-block w-full select-none">
             <img

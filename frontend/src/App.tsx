@@ -524,7 +524,7 @@ function App() {
         {/* Build marker — confirms at a glance which deploy is live. */}
         <div className="max-w-6xl mx-auto text-center mt-2">
           <span className="inline-block px-3 py-1 rounded-full bg-green-600 text-white text-base font-bold">
-            VERSION 2.2 — 6-max seats
+            VERSION 3.0 — auto board detection
           </span>
         </div>
       </footer>

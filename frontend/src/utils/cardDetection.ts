@@ -1,14 +1,15 @@
 /**
  * Card Detection for ClubWPT Gold Screenshots
  *
- * Detection is driven entirely by calibration data the user supplies once:
+ * The community cards locate themselves: they are the only face-up group on the
+ * table that is evenly spaced and unoccluded, so they can be found from their
+ * face colours alone. Their position and size then form the coordinate frame
+ * everything else is measured in, which is what lets one calibration serve
+ * screenshots taken at different window sizes.
  *
- *   - Card slots  — where each card sits on the table, as fractions of the image
- *   - Glyph templates — what each rank looks like, as normalised bitmaps
- *
- * With both in hand, reading a screenshot is deterministic: crop each slot,
- * take the suit from the ink colour, match the rank glyph against the templates.
- * No model, no network call, no heuristics about where cards might be.
+ * Reading is deterministic throughout — suit from the card's face colour, rank
+ * by matching its glyph against templates the user taught. No model, no network
+ * call.
  */
 
 import { Card, Rank, Suit } from '../types';
@@ -25,12 +26,27 @@ import {
   matchSuitByColor,
   opponentSeat,
 } from './glyphTemplates';
+import {
+  BoardAnchor,
+  CardRegion,
+  findBoard,
+  findCardRegions,
+  rankGlyphBounds,
+  toAbsolute,
+} from './tableAnalysis';
 
-/** Below this similarity we treat the read as a miss rather than guess. */
-const MIN_SCORE = 0.55;
+/**
+ * Below this similarity we refuse the read rather than guess.
+ *
+ * Set from measurement across two screenshots at different scales: every
+ * correct read scored 0.906 or better, every incorrect one 0.761 or worse.
+ * 0.85 sits in that gap, so an untaught rank is declined instead of being
+ * forced onto the nearest template it happens to resemble.
+ */
+const MIN_SCORE = 0.85;
 
 /** A win this narrow over the runner-up means two ranks looked alike. */
-const MIN_MARGIN = 0.04;
+const MIN_MARGIN = 0.05;
 
 export interface SlotReading {
   role: SlotRole;
@@ -67,9 +83,6 @@ export async function detectCards(
   templates: GlyphTemplate[],
   suitSamples: SuitSample[] = []
 ): Promise<DetectionResult> {
-  if (slots.length === 0) {
-    return emptyResult('No card slots calibrated yet.');
-  }
   if (templates.length === 0) {
     return emptyResult('No rank templates taught yet.');
   }
@@ -81,7 +94,26 @@ export async function detectCards(
     return emptyResult(error instanceof Error ? error.message : 'Failed to load image');
   }
 
-  const readings = slots.map(slot => readSlot(imageData, slot, templates, suitSamples));
+  // The board locates itself: community cards are the only face-up group that
+  // is evenly spaced and unoccluded, so they can be found without calibration.
+  // Everything else is then measured against them, which is what makes a
+  // calibration survive a screenshot taken at a different size.
+  const anchor = findBoard(findCardRegions(imageData));
+  if (!anchor) {
+    return emptyResult(
+      'Could not find the community cards. Is the board visible in this screenshot?'
+    );
+  }
+
+  const boardReadings = anchor.cards.map((card, index) =>
+    readBoardCard(imageData, card, index, templates)
+  );
+
+  const seatReadings = slots
+    .filter(slot => slot.role !== 'board')
+    .map(slot => readSeatSlot(imageData, slot, anchor, templates, suitSamples));
+
+  const readings = [...boardReadings, ...seatReadings];
 
   const cardsFor = (role: SlotRole): Card[] =>
     readings
@@ -128,27 +160,62 @@ function emptyResult(message: string): DetectionResult {
 }
 
 /**
- * Read a single slot: is a card there, what suit, what rank.
+ * Read a community card.
+ *
+ * The suit is already known — the card was found by its colour — so only the
+ * rank needs matching.
  */
-function readSlot(
+function readBoardCard(
+  imageData: ImageData,
+  card: CardRegion,
+  index: number,
+  templates: GlyphTemplate[]
+): SlotReading {
+  const signature = extractSignature(imageData, rankGlyphBounds(card));
+  return finishReading(
+    { role: 'board', index, card: null, score: 0, margin: 0 },
+    signature,
+    card.suit,
+    templates
+  );
+}
+
+/**
+ * Read a seat card from its board-relative position.
+ */
+function readSeatSlot(
   imageData: ImageData,
   slot: CardSlot,
+  anchor: BoardAnchor,
   templates: GlyphTemplate[],
   suitSamples: SuitSample[]
 ): SlotReading {
   const base: SlotReading = { role: slot.role, index: slot.index, card: null, score: 0, margin: 0 };
 
-  const bounds = slotToBounds(slot, imageData.width, imageData.height);
+  const bounds = toAbsolute(
+    { dx: slot.dx, dy: slot.dy, dw: slot.dw, dh: slot.dh },
+    anchor
+  );
 
   const signature = extractSignature(imageData, bounds);
-  if (!signature) {
-    // No ink in the slot — normally just an empty seat or an undealt street.
-    return { ...base, note: 'empty' };
-  }
-
   const suit = identifySuit(imageData, bounds, suitSamples);
   if (!suit) {
-    return { ...base, signature, note: 'suit unclear' };
+    return { ...base, signature: signature ?? undefined, note: 'suit unclear' };
+  }
+
+  return finishReading(base, signature, suit, templates);
+}
+
+/** Shared tail: match the rank and decide whether the read is trustworthy. */
+function finishReading(
+  base: SlotReading,
+  signature: Signature | null,
+  suit: Suit,
+  templates: GlyphTemplate[]
+): SlotReading {
+  if (!signature) {
+    // No ink — an empty seat, an undealt street, or a face-down card.
+    return { ...base, note: 'empty' };
   }
 
   const match = matchSignature(signature, templates);
@@ -185,15 +252,6 @@ function readSlot(
   };
 }
 
-/** Convert a slot's stored fractions into pixel bounds for this image. */
-function slotToBounds(slot: CardSlot, imageWidth: number, imageHeight: number): Bounds {
-  return {
-    x: slot.x * imageWidth,
-    y: slot.y * imageHeight,
-    width: slot.width * imageWidth,
-    height: slot.height * imageHeight,
-  };
-}
 
 /**
  * Identify the suit of a card region.
