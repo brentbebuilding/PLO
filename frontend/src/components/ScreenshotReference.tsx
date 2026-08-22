@@ -26,6 +26,15 @@ interface Reading {
   hands: Slot[][];
   message?: string;
   preflop: boolean;
+  /**
+   * Which hand is the user's.
+   *
+   * Not detectable from the screenshot: the hands panel lists players in seat
+   * order, so the position varies, and the cards at the user's own seat are
+   * fanned and half-hidden behind their name plate — too occluded to match
+   * against the panel. One click is more honest than a guess.
+   */
+  heroIndex: number;
 }
 
 /** Which card the user is currently replacing. */
@@ -74,8 +83,23 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
     const solid = (slots: Slot[]) =>
       slots.filter((s): s is { card: Card } => s.card !== null).map(s => s.card);
 
-    const hands = next.hands.map(solid).filter(h => h.length > 0);
-    onCardsDetected?.({ playerCards: hands, boardCards: solid(next.board) });
+    // The user's hand goes first so it lands in the calculator as Player 1.
+    const ordered = [
+      next.hands[next.heroIndex],
+      ...next.hands.filter((_, i) => i !== next.heroIndex),
+    ].filter(Boolean);
+
+    onCardsDetected?.({
+      playerCards: ordered.map(solid).filter(h => h.length > 0),
+      boardCards: solid(next.board),
+    });
+  };
+
+  const setHero = (index: number) => {
+    if (!reading) return;
+    const next = { ...reading, heroIndex: index };
+    setReading(next);
+    publish(next);
   };
 
   const read = async () => {
@@ -120,6 +144,7 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
         hands,
         message: result.message,
         preflop: boardCount === 0,
+        heroIndex: 0,
       };
 
       setReading(next);
@@ -257,8 +282,14 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
               {reading.hands.map((hand, seat) => (
                 <CardRow
                   key={seat}
-                  label={seat === 0 ? 'Your hand' : `Opponent ${seat}`}
+                  label={
+                    seat === reading.heroIndex
+                      ? 'Your hand'
+                      : `Opponent ${seat < reading.heroIndex ? seat + 1 : seat}`
+                  }
                   slots={hand}
+                  isHero={seat === reading.heroIndex}
+                  onClaim={() => setHero(seat)}
                   onPick={i => setEditing({ group: seat, index: i })}
                 />
               ))}
@@ -273,6 +304,12 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
                 Click any card to change it. A{' '}
                 <span className="font-mono text-gray-400">?</span> means it could not be
                 read with confidence — it is never guessed.
+                {reading.hands.length > 1 && (
+                  <>
+                    {' '}Which hand is yours cannot be told from the screenshot, so click{' '}
+                    <span className="text-gray-400">this is mine</span> on the right row.
+                  </>
+                )}
               </p>
             </div>
           )}
@@ -326,10 +363,16 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
 const CardRow: React.FC<{
   label: string;
   slots: Slot[];
+  isHero?: boolean;
+  onClaim?: () => void;
   onPick: (index: number) => void;
-}> = ({ label, slots, onPick }) => (
+}> = ({ label, slots, isHero, onClaim, onPick }) => (
   <div className="flex items-center gap-2 flex-wrap">
-    <span className="text-gray-400 text-xs w-20 shrink-0">{label}</span>
+    <span
+      className={`text-xs w-20 shrink-0 ${isHero ? 'text-green-400 font-medium' : 'text-gray-400'}`}
+    >
+      {label}
+    </span>
     {slots.map((slot, i) => (
       <button
         key={i}
@@ -341,6 +384,14 @@ const CardRow: React.FC<{
         {slot.card ? `${displayRank(slot.card.rank)}${SUIT_SYMBOLS[slot.card.suit]}` : '?'}
       </button>
     ))}
+    {onClaim && !isHero && (
+      <button
+        onClick={onClaim}
+        className="text-gray-600 hover:text-green-400 text-xs underline underline-offset-2"
+      >
+        this is mine
+      </button>
+    )}
   </div>
 );
 
