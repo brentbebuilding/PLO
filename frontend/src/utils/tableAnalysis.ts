@@ -440,9 +440,13 @@ export function toAbsolute(
 /**
  * Where the rank character sits within a card.
  *
- * Cards carry the rank in the top-left corner with the suit pip below it. The
- * crop stops short of the pip; anything that still bleeds in is dropped later
- * by keeping only the topmost blob of ink.
+ * The rank sits in the top-left corner. The width matters more than it looks:
+ * on a large board card the pip sits below the rank, but on a small sidebar
+ * thumbnail it sits beside it, and a crop wide enough to be safe on the former
+ * swallowed the pip on the latter — the glyph then normalised as two merged
+ * shapes and matched nothing. Narrowing to 0.40 took hand reads from 103 to 135
+ * across the screenshot set with no board card lost; 0.35 scored the same, so
+ * 0.40 keeps margin for a wide "10".
  */
 export function rankGlyphBounds(card: {
   x: number;
@@ -453,7 +457,7 @@ export function rankGlyphBounds(card: {
   return {
     x: card.x + card.width * 0.06,
     y: card.y + card.height * 0.04,
-    width: card.width * 0.62,
+    width: card.width * 0.40,
     height: card.height * 0.42,
   };
 }
