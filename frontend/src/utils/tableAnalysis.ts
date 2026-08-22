@@ -566,3 +566,205 @@ export function rankGlyphBounds(card: {
     height: card.height * 0.42,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Identifying the user among the revealed hands
+// ---------------------------------------------------------------------------
+
+/**
+ * Prefix sums over each colour channel, so the mean colour of any rectangle is
+ * four lookups instead of a loop. The hero search evaluates thousands of boxes
+ * across position and scale, which is far too slow without this.
+ */
+interface Integral {
+  width: number;
+  height: number;
+  sums: Float64Array;
+}
+
+function buildIntegral(image: PixelSource): Integral {
+  const { width: W, height: H, data } = image;
+  const stride = (W + 1) * 3;
+  const sums = new Float64Array((W + 1) * (H + 1) * 3);
+
+  for (let y = 0; y < H; y++) {
+    let rowR = 0;
+    let rowG = 0;
+    let rowB = 0;
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      rowR += data[i];
+      rowG += data[i + 1];
+      rowB += data[i + 2];
+      const here = (y + 1) * stride + (x + 1) * 3;
+      const above = y * stride + (x + 1) * 3;
+      sums[here] = sums[above] + rowR;
+      sums[here + 1] = sums[above + 1] + rowG;
+      sums[here + 2] = sums[above + 2] + rowB;
+    }
+  }
+  return { width: W, height: H, sums };
+}
+
+/** Mean colour of a rectangle, clamped to the image. */
+function meanColor(
+  integral: Integral,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  out: number[],
+  at: number
+): void {
+  const { width: W, height: H, sums } = integral;
+  const stride = (W + 1) * 3;
+  const ax = Math.max(0, Math.min(W, Math.round(x0)));
+  const ay = Math.max(0, Math.min(H, Math.round(y0)));
+  const bx = Math.max(0, Math.min(W, Math.round(x1)));
+  const by = Math.max(0, Math.min(H, Math.round(y1)));
+
+  const area = (bx - ax) * (by - ay);
+  if (area <= 0) {
+    out[at] = out[at + 1] = out[at + 2] = 0;
+    return;
+  }
+
+  const A = ay * stride + ax * 3;
+  const B = ay * stride + bx * 3;
+  const C = by * stride + ax * 3;
+  const D = by * stride + bx * 3;
+  out[at] = (sums[D] - sums[B] - sums[C] + sums[A]) / area;
+  out[at + 1] = (sums[D + 1] - sums[B + 1] - sums[C + 1] + sums[A + 1]) / area;
+  out[at + 2] = (sums[D + 2] - sums[B + 2] - sums[C + 2] + sums[A + 2]) / area;
+}
+
+/** Avatar grid resolution. 8x8 carries enough of a face to be distinctive. */
+const AVATAR_GRID = 8;
+
+/**
+ * Scale-invariant colour signature of a rectangle.
+ *
+ * Sampling a fixed grid rather than fixed pixels is what lets a 60px panel
+ * thumbnail be compared against the same avatar drawn at 90px on the table.
+ */
+function avatarSignature(
+  integral: Integral,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): number[] {
+  const out = new Array<number>(AVATAR_GRID * AVATAR_GRID * 3);
+  let at = 0;
+  for (let gy = 0; gy < AVATAR_GRID; gy++) {
+    for (let gx = 0; gx < AVATAR_GRID; gx++) {
+      meanColor(
+        integral,
+        x + (w * gx) / AVATAR_GRID,
+        y + (h * gy) / AVATAR_GRID,
+        x + (w * (gx + 1)) / AVATAR_GRID,
+        y + (h * (gy + 1)) / AVATAR_GRID,
+        out,
+        at
+      );
+      at += 3;
+    }
+  }
+  return out;
+}
+
+/** Correlation, so a brightness difference between the two draws doesn't dominate. */
+function correlate(a: number[], b: number[]): number {
+  const n = a.length;
+  let meanA = 0;
+  let meanB = 0;
+  for (let i = 0; i < n; i++) {
+    meanA += a[i];
+    meanB += b[i];
+  }
+  meanA /= n;
+  meanB /= n;
+
+  let num = 0;
+  let devA = 0;
+  let devB = 0;
+  for (let i = 0; i < n; i++) {
+    const da = a[i] - meanA;
+    const db = b[i] - meanB;
+    num += da * db;
+    devA += da * da;
+    devB += db * db;
+  }
+  return devA && devB ? num / Math.sqrt(devA * devB) : 0;
+}
+
+/**
+ * Where a hands-panel row draws that player's avatar: left of their cards,
+ * spanning a little more than the card height. Measured off the client.
+ */
+function panelAvatarBox(row: CardRegion[]) {
+  const h = row[0].height;
+  return { x: row[0].x - h * 2.15, y: row[0].y - h * 0.05, w: h * 1.5, h: h * 1.33 };
+}
+
+/** Below this correlation the match is not trusted and no hero is claimed. */
+const HERO_MIN_CORRELATION = 0.8;
+
+export interface HeroMatch {
+  /** Index into the rows passed in. */
+  row: number;
+  correlation: number;
+}
+
+/**
+ * Work out which revealed hand belongs to the user.
+ *
+ * The user's seat is always bottom-centre, but their cards there are useless
+ * for this: once they fold, the client greys them until neither suit nor rank
+ * survives — one folded hand measured as a single uniform blob with no rank ink
+ * anywhere in it.
+ *
+ * Their avatar is not greyed, and the same avatar appears both at the seat and
+ * beside their row in the hands panel. So each row's avatar is searched for
+ * across the bottom-centre of the table, over position and scale, and whichever
+ * row is found there is the user's. The seat is universal, so this works for any
+ * player without knowing their name or picture.
+ */
+export function findHeroRow(
+  image: PixelSource,
+  rows: CardRegion[][]
+): HeroMatch | null {
+  if (rows.length === 0) return null;
+  if (rows.length === 1) return { row: 0, correlation: 1 };
+
+  const integral = buildIntegral(image);
+  const panels = rows.map(row => {
+    const box = panelAvatarBox(row);
+    return avatarSignature(integral, box.x, box.y, box.w, box.h);
+  });
+
+  const baseW = panelAvatarBox(rows[0]).w;
+  const baseH = panelAvatarBox(rows[0]).h;
+  const centreX = image.width / 2;
+
+  let best: HeroMatch | null = null;
+  const step = Math.max(4, Math.round(image.height / 200));
+
+  // The table avatar is drawn larger than the panel thumbnail, and by how much
+  // depends on the window size, so scale is searched rather than assumed.
+  for (let scale = 1.0; scale <= 2.2; scale += 0.15) {
+    const w = baseW * scale;
+    const h = baseH * scale;
+    for (let y = image.height * 0.52; y < image.height * 0.78 - h; y += step) {
+      for (let dx = -w * 0.9; dx <= w * 0.9; dx += step) {
+        const probe = avatarSignature(integral, centreX + dx - w / 2, y, w, h);
+        for (let i = 0; i < panels.length; i++) {
+          const c = correlate(probe, panels[i]);
+          if (!best || c > best.correlation) best = { row: i, correlation: c };
+        }
+      }
+    }
+  }
+
+  return best && best.correlation >= HERO_MIN_CORRELATION ? best : null;
+}

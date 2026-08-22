@@ -33,6 +33,7 @@ import {
   findBoard,
   findCardRegions,
   findHandRows,
+  findHeroRow,
   rankGlyphBounds,
   toAbsolute,
 } from './tableAnalysis';
@@ -122,13 +123,21 @@ export async function detectCards(
     const rows = anchor
       ? findHandRows(regions, anchor, 2, imageData)
       : findHandRows(regions, { cards: [], originX: 0, originY: 0, unitX: 1, unitY: 1 }, 3, imageData);
+    // The user always sits bottom-centre, so whichever row's avatar is drawn
+    // there is theirs. Falls back to the first row when no confident match.
+    const hero = findHeroRow(imageData, rows);
+    const heroRow = hero ? hero.row : 0;
+
+    let opponentSeat = 0;
     rows.forEach((row, seatIndex) => {
+      const isHero = seatIndex === heroRow;
+      const seat = isHero ? 0 : opponentSeat++;
       row.forEach((card, cardIndex) => {
         const reading = readBoardCard(imageData, card, cardIndex, templates);
         handReadings.push({
           ...reading,
-          role: seatIndex === 0 ? 'hero' : 'opponent',
-          index: seatIndex === 0 ? cardIndex : (seatIndex - 1) * CARDS_PER_HAND + cardIndex,
+          role: isHero ? 'hero' : 'opponent',
+          index: isHero ? cardIndex : seat * CARDS_PER_HAND + cardIndex,
         });
       });
     });
