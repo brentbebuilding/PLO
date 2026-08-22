@@ -7,10 +7,13 @@ import {
   Bounds,
   CardSlot,
   GlyphTemplate,
+  CARDS_PER_HAND,
+  OPPONENT_SEATS,
   SLOT_COUNTS,
   Signature,
   SlotRole,
   SuitSample,
+  opponentSeat,
   addSlot,
   addSuitSample,
   addTemplate,
@@ -33,13 +36,21 @@ interface CardCalibrationProps {
   onClose?: () => void;
 }
 
-const ROLE_ORDER: SlotRole[] = ['hero', 'villain', 'board'];
+const ROLE_ORDER: SlotRole[] = ['board', 'hero', 'opponent'];
 
 const ROLE_LABEL: Record<SlotRole, string> = {
   hero: 'Your hand',
-  villain: "Opponent's hand",
+  opponent: 'Opponent seats',
   board: 'Board',
 };
+
+/** Human-readable description of the slot currently being marked. */
+function describeTarget(role: SlotRole, index: number): string {
+  if (role === 'opponent') {
+    return `Opponent seat ${opponentSeat(index)} — card ${(index % CARDS_PER_HAND) + 1} of ${CARDS_PER_HAND}`;
+  }
+  return `${ROLE_LABEL[role]} — card ${index + 1} of ${SLOT_COUNTS[role]}`;
+}
 
 interface PendingRegion {
   bounds: Bounds;
@@ -61,7 +72,7 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
   const [templates, setTemplates] = useState<GlyphTemplate[]>(() => loadTemplates());
   const [suitSamples, setSuitSamples] = useState<SuitSample[]>(() => loadSuitSamples());
   const [target, setTarget] = useState<{ role: SlotRole; index: number }>({
-    role: 'hero',
+    role: 'board',
     index: 0,
   });
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -200,7 +211,10 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
     // The card face carries the suit, so sample that rather than the white ink.
     const face = extractBackgroundColor(imageData, pending.bounds);
     if (face) {
-      setSuitSamples(addSuitSample(suitSamples, { suit, ...face }));
+      // Keyed by slot so re-teaching a mislabelled card replaces its colour
+      // rather than leaving the wrong one in the pile.
+      const slotKey = `${target.role}:${target.index}`;
+      setSuitSamples(addSuitSample(suitSamples, { suit, slotKey, ...face }));
     }
 
     setPending(null);
@@ -225,7 +239,7 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
     setSlots([]);
     setTemplates([]);
     setSuitSamples([]);
-    setTarget({ role: 'hero', index: 0 });
+    setTarget({ role: 'board', index: 0 });
     setPending(null);
   };
 
@@ -317,9 +331,8 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
           <div className="bg-blue-900/30 border border-blue-700 rounded-lg px-3 py-2 text-sm">
             <span className="text-blue-300">Now marking: </span>
             <span className="text-white font-medium">
-              {ROLE_LABEL[target.role]} — card {target.index + 1}
+              {describeTarget(target.role, target.index)}
             </span>
-            <span className="text-gray-400"> of {SLOT_COUNTS[target.role]}</span>
           </div>
 
           <div className="relative inline-block w-full select-none">
@@ -470,7 +483,7 @@ const Progress: React.FC<{
   onJump: (target: { role: SlotRole; index: number }) => void;
 }> = ({ captured, taughtRanks, suitSamples, onJump }) => (
   <div className="border-t border-gray-700 pt-3 space-y-2">
-    {ROLE_ORDER.map(role => (
+    {ROLE_ORDER.filter(role => role !== 'opponent').map(role => (
       <div key={role} className="flex items-center gap-2">
         <span className="text-gray-400 text-xs w-32 shrink-0">{ROLE_LABEL[role]}</span>
         <div className="flex gap-1">
@@ -487,6 +500,33 @@ const Progress: React.FC<{
               {i + 1}
             </button>
           ))}
+        </div>
+      </div>
+    ))}
+
+    {/* Opponents get a row per seat — 20 buttons in one line is unreadable. */}
+    {Array.from({ length: OPPONENT_SEATS }, (_, seat) => (
+      <div key={seat} className="flex items-center gap-2">
+        <span className="text-gray-400 text-xs w-32 shrink-0">
+          Opponent seat {seat + 1}
+        </span>
+        <div className="flex gap-1">
+          {Array.from({ length: CARDS_PER_HAND }, (_, card) => {
+            const index = seat * CARDS_PER_HAND + card;
+            return (
+              <button
+                key={card}
+                onClick={() => onJump({ role: 'opponent', index })}
+                className={`w-7 h-7 rounded text-xs font-medium ${
+                  captured.has(`opponent:${index}`)
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                }`}
+              >
+                {card + 1}
+              </button>
+            );
+          })}
         </div>
       </div>
     ))}

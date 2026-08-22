@@ -23,6 +23,7 @@ import {
   extractSignature,
   matchSignature,
   matchSuitByColor,
+  opponentSeat,
 } from './glyphTemplates';
 
 /** Below this similarity we treat the read as a miss rather than guess. */
@@ -49,7 +50,8 @@ export interface SlotReading {
 export interface DetectionResult {
   success: boolean;
   hero: Card[];
-  villain: Card[];
+  /** One entry per opponent seat that showed cards, in seat order. */
+  villains: Card[][];
   board: Card[];
   /** Per-slot detail, including failures — drives the review UI. */
   readings: SlotReading[];
@@ -88,14 +90,30 @@ export async function detectCards(
       .map(r => r.card as Card);
 
   const hero = cardsFor('hero');
-  const villain = cardsFor('villain');
   const board = cardsFor('board');
-  const total = hero.length + villain.length + board.length;
+
+  // Group opponent readings into hands by seat, keeping only seats that
+  // actually showed cards — folded seats read as empty and drop out.
+  const bySeat = new Map<number, Card[]>();
+  for (const reading of readings) {
+    if (reading.role !== 'opponent' || reading.card === null) continue;
+    const seat = opponentSeat(reading.index);
+    const hand = bySeat.get(seat) ?? [];
+    hand.push(reading.card);
+    bySeat.set(seat, hand);
+  }
+
+  const villains = [...bySeat.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, hand]) => hand);
+
+  const total =
+    hero.length + board.length + villains.reduce((sum, hand) => sum + hand.length, 0);
 
   return {
     success: total > 0,
     hero,
-    villain,
+    villains,
     board,
     readings,
     message:
@@ -106,7 +124,7 @@ export async function detectCards(
 }
 
 function emptyResult(message: string): DetectionResult {
-  return { success: false, hero: [], villain: [], board: [], readings: [], message };
+  return { success: false, hero: [], villains: [], board: [], readings: [], message };
 }
 
 /**

@@ -417,9 +417,21 @@ const SUIT_SAMPLES_KEY = 'plo_suit_samples_v1';
 /** A colour the user confirmed belongs to a given suit. */
 export interface SuitSample extends InkColor {
   suit: Suit;
+  /**
+   * Which slot this was taken from, as "role:index".
+   *
+   * Re-teaching a slot has to replace its colour sample, not add another — a
+   * mislabelled card would otherwise poison the suit it was wrongly assigned to
+   * for good, with a full reset the only way out.
+   */
+  slotKey?: string;
 }
 
-export type SlotRole = 'hero' | 'villain' | 'board';
+export type SlotRole = 'hero' | 'opponent' | 'board';
+
+/** Opponent seats at a 6-max table, excluding the hero's own seat. */
+export const OPPONENT_SEATS = 5;
+export const CARDS_PER_HAND = 4;
 
 /**
  * A card position on the table, captured once during calibration.
@@ -514,15 +526,23 @@ export function saveSuitSamples(samples: SuitSample[]): void {
 /**
  * Record a confirmed suit colour.
  *
- * Several samples per suit are kept — a suit can be drawn at different
- * brightnesses across the table — but capped so one suit can't crowd out the
- * others in the nearest-neighbour search.
+ * Several samples per suit are kept — the client dims cards that aren't in the
+ * winning hand, so one suit legitimately appears at different brightnesses —
+ * but capped so a suit can't crowd out the others in the nearest-neighbour
+ * search. Re-teaching a slot replaces that slot's sample rather than stacking a
+ * second one, so corrections actually take effect.
  */
 export function addSuitSample(samples: SuitSample[], next: SuitSample): SuitSample[] {
   const MAX_PER_SUIT = 6;
-  const sameSuit = samples.filter(s => s.suit === next.suit);
-  const others = samples.filter(s => s.suit !== next.suit);
+
+  const withoutSlot = next.slotKey
+    ? samples.filter(s => s.slotKey !== next.slotKey)
+    : samples;
+
+  const sameSuit = withoutSlot.filter(s => s.suit === next.suit);
+  const others = withoutSlot.filter(s => s.suit !== next.suit);
   const trimmed = [...sameSuit, next].slice(-MAX_PER_SUIT);
+
   const updated = [...others, ...trimmed];
   saveSuitSamples(updated);
   return updated;
@@ -532,12 +552,23 @@ export function clearSuitSamples(): void {
   localStorage.removeItem(SUIT_SAMPLES_KEY);
 }
 
-/** How many slots each role expects, for progress display during calibration. */
+/**
+ * How many slots each role expects.
+ *
+ * Opponents cover every other seat at a 6-max table rather than a single
+ * "villain": which seat shows down changes hand to hand, so fixed villain slots
+ * only ever caught opponents sitting in one place.
+ */
 export const SLOT_COUNTS: Record<SlotRole, number> = {
-  hero: 4,
-  villain: 4,
+  hero: CARDS_PER_HAND,
+  opponent: OPPONENT_SEATS * CARDS_PER_HAND,
   board: 5,
 };
+
+/** Seat number (1-based) an opponent slot index belongs to. */
+export function opponentSeat(index: number): number {
+  return Math.floor(index / CARDS_PER_HAND) + 1;
+}
 
 /** Ranks still missing a template, so the UI can tell the user what's left. */
 export function missingRanks(templates: GlyphTemplate[], allRanks: readonly Rank[]): Rank[] {

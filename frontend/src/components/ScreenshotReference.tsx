@@ -326,19 +326,25 @@ export const ScreenshotReference: React.FC<ScreenshotReferenceProps> = ({
       const result = await detectCards(preview, slots, templates, suitSamples);
       const asText = (cards: Card[]) => cards.map(c => `${c.rank}${c.suit}`).join(' ');
 
-      setCollectedCards({ hero: result.hero, villain: result.villain, board: result.board });
+      // Any opponent seat that showed cards becomes a player in the equity calc.
+      const villains = result.villains.filter(hand => hand.length > 0);
+
+      setCollectedCards({
+        hero: result.hero,
+        villain: villains[0] ?? [],
+        board: result.board,
+      });
       setDetectionResult({
         hero: asText(result.hero),
-        villain: asText(result.villain),
+        villain: villains.map(asText).join('  |  '),
         board: asText(result.board),
         analysis: result.message,
       });
 
-      const playerCards: Card[][] = [result.hero];
-      if (result.villain.length > 0) {
-        playerCards.push(result.villain);
-      }
-      onCardsDetected?.({ playerCards, boardCards: result.board });
+      onCardsDetected?.({
+        playerCards: [result.hero, ...villains],
+        boardCards: result.board,
+      });
 
       if (!result.success) {
         setDetectionError(result.message ?? 'Could not read any cards');

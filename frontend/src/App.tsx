@@ -247,17 +247,27 @@ function App() {
 
   // Handle cards detected from screenshot
   const handleCardsDetected = (result: { playerCards: CardType[][]; boardCards: CardType[] }) => {
-    // Update player cards with detected cards
-    const newPlayerCards = [...playerCards];
-    result.playerCards.forEach((hand, playerIdx) => {
-      if (playerIdx < numPlayers) {
-        hand.forEach((card, cardIdx) => {
-          if (cardIdx < 4) {
-            newPlayerCards[playerIdx][cardIdx] = card;
-          }
-        });
-      }
+    // A showdown can reveal more hands than there are seats configured, so grow
+    // to fit rather than silently dropping the extras.
+    const MAX_PLAYERS = 6;
+    const detectedCount = Math.min(result.playerCards.length, MAX_PLAYERS);
+    const seatCount = Math.max(numPlayers, detectedCount);
+
+    const newPlayerCards = Array.from({ length: seatCount }, (_, i) =>
+      playerCards[i] ? [...playerCards[i]] : [null, null, null, null]
+    );
+
+    result.playerCards.slice(0, MAX_PLAYERS).forEach((hand, playerIdx) => {
+      hand.forEach((card, cardIdx) => {
+        if (cardIdx < 4) {
+          newPlayerCards[playerIdx][cardIdx] = card;
+        }
+      });
     });
+
+    if (seatCount !== numPlayers) {
+      setNumPlayers(seatCount);
+    }
     setPlayerCards(newPlayerCards);
 
     // Update board cards with detected cards
@@ -514,7 +524,7 @@ function App() {
         {/* Build marker — confirms at a glance which deploy is live. */}
         <div className="max-w-6xl mx-auto text-center mt-2">
           <span className="inline-block px-3 py-1 rounded-full bg-green-600 text-white text-base font-bold">
-            VERSION 2.1 — suit from card colour
+            VERSION 2.2 — 6-max seats
           </span>
         </div>
       </footer>
