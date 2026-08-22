@@ -106,7 +106,7 @@ export const CardCalibration: React.FC<CardCalibrationProps> = ({ onDone, onClos
       try {
         const decoded = await loadImageData(src);
         setImageData(decoded);
-        const found = findBoard(findCardRegions(decoded));
+        const found = findBoard(findCardRegions(decoded), decoded.height);
         setAnchor(found);
         setBoardGlyphs(
           found

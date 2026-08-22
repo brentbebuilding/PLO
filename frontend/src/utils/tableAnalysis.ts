@@ -226,6 +226,19 @@ export function findCardRegions(
   return regions;
 }
 
+/**
+ * Smallest a board card can be, as a fraction of image height.
+ *
+ * Sits in the gap between the two populations: 0.028 for the largest preflop
+ * candidate, 0.043 for the smallest real board.
+ */
+const MIN_BOARD_HEIGHT_RATIO = 0.035;
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
 /** Aspect and solidity a lone, unoccluded card falls within. */
 const CARD_MIN_ASPECT = 0.55;
 const CARD_MAX_ASPECT = 0.95;
@@ -239,7 +252,10 @@ const CARD_MIN_HEIGHT = 24;
  * and unoccluded, which is what makes them a dependable anchor. Hole cards are
  * fanned and overlap, so they merge into blobs that fail the fill test.
  */
-export function findBoard(regions: CardRegion[]): BoardAnchor | null {
+export function findBoard(
+  regions: CardRegion[],
+  imageHeight?: number
+): BoardAnchor | null {
   const candidates = regions.filter(r => {
     const aspect = r.width / r.height;
     return (
@@ -262,6 +278,24 @@ export function findBoard(regions: CardRegion[]): BoardAnchor | null {
     else rows.push([card]);
   }
 
+  // A row can sweep in unrelated cards that merely share a height, so split it
+  // wherever the spacing jumps. Community cards are evenly spaced; one observed
+  // row ran 82,81,82,82 then 246, and the tail was a different element entirely.
+  const runs = rows.flatMap(splitOnSpacingBreak);
+
+  // Drop the hands panel. It lists every player's cards as rows that share an
+  // x origin and card size, so two or more such rows are a list, never the
+  // board — which is unique. Without this a preflop screenshot, having no
+  // community cards at all, returns somebody's hand as the board.
+  const panelKey = (row: CardRegion[]) =>
+    `${Math.round(row[0].x / 8)}:${Math.round(row[0].height / 4)}`;
+  const keyCounts = new Map<string, number>();
+  for (const row of runs) {
+    const key = panelKey(row);
+    keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  }
+  const notPanel = runs.filter(row => (keyCounts.get(panelKey(row)) ?? 0) < 2);
+
   // Pick by card size, not by how many are in the row.
   //
   // Counting fails on a turn: four community cards tie with a four-card hole
@@ -274,20 +308,23 @@ export function findBoard(regions: CardRegion[]): BoardAnchor | null {
     return areas[Math.floor(areas.length / 2)];
   };
 
-  const board = rows
-    .filter(row => row.length >= 3)
+  const board = notPanel
+    .filter(row => row.length >= 3 && row.length <= 5)
     .sort((a, b) => medianArea(b) - medianArea(a))[0];
   if (!board) return null;
 
-  board.sort((a, b) => a.x - b.x);
+  // Community cards are drawn much larger than anything else on screen. When
+  // the biggest row is still small, no board is dealt and what we found is a
+  // hand — the preflop case, where the hands panel is the only thing showing
+  // cards at all. Measured across twenty screenshots, real boards ran 4.3% to
+  // 9.4% of image height while every preflop candidate sat at 2.8% or below.
+  if (imageHeight) {
+    const relativeHeight = median(board.map(c => c.height)) / imageHeight;
+    if (relativeHeight < MIN_BOARD_HEIGHT_RATIO) return null;
+  }
 
   // Median rather than the first card's size: a partially occluded card at the
   // edge of the row reports short, which would skew every derived position.
-  const median = (values: number[]) => {
-    const sorted = [...values].sort((a, b) => a - b);
-    return sorted[Math.floor(sorted.length / 2)];
-  };
-
   return {
     cards: board,
     originX: board[0].x,
@@ -339,6 +376,33 @@ export function findHandRows(
     .filter(r => r.length >= minCards)
     .map(r => r.sort((a, b) => a.x - b.x))
     .sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Break a row wherever the spacing between cards jumps.
+ *
+ * Cards dealt as a group sit at a regular pitch. A gap well outside that pitch
+ * means the next card belongs to something else that happens to share a height.
+ */
+function splitOnSpacingBreak(row: CardRegion[]): CardRegion[][] {
+  if (row.length < 3) return [row];
+  const sorted = [...row].sort((a, b) => a.x - b.x);
+
+  const gaps = sorted.slice(1).map((c, i) => c.x - sorted[i].x);
+  const ordered = [...gaps].sort((a, b) => a - b);
+  const typical = ordered[Math.floor(ordered.length / 2)];
+
+  const runs: CardRegion[][] = [];
+  let current: CardRegion[] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    if (gaps[i - 1] > typical * 1.6) {
+      runs.push(current);
+      current = [];
+    }
+    current.push(sorted[i]);
+  }
+  runs.push(current);
+  return runs;
 }
 
 /** A rectangle expressed in board units, so it survives a rescaled screenshot. */

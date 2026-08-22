@@ -101,26 +101,28 @@ export async function detectCards(
   // Everything else is then measured against them, which is what makes a
   // calibration survive a screenshot taken at a different size.
   const regions = findCardRegions(imageData);
-  const anchor = findBoard(regions);
-  if (!anchor) {
-    return emptyResult(
-      'Could not find the community cards. Is the board visible in this screenshot?'
-    );
-  }
+  // No board means preflop, not failure: the hands panel still shows cards,
+  // and preflop equity needs no board anyway.
+  const anchor = findBoard(regions, imageData.height);
 
-  const boardReadings = anchor.cards.map((card, index) =>
-    readBoardCard(imageData, card, index, templates)
-  );
+  const boardReadings = anchor
+    ? anchor.cards.map((card, index) => readBoardCard(imageData, card, index, templates))
+    : [];
 
-  const seatReadings = slots
-    .filter(slot => slot.role !== 'board')
-    .map(slot => readSeatSlot(imageData, slot, anchor, templates, suitSamples));
+  const seatReadings = anchor
+    ? slots
+        .filter(slot => slot.role !== 'board')
+        .map(slot => readSeatSlot(imageData, slot, anchor, templates, suitSamples))
+    : [];
 
   // Hands shown in the client's hands panel. Read only when nothing has been
   // calibrated by hand, so a user's own slots always take precedence.
   const handReadings: SlotReading[] = [];
   if (seatReadings.length === 0) {
-    findHandRows(regions, anchor).forEach((row, seatIndex) => {
+    const rows = anchor
+      ? findHandRows(regions, anchor)
+      : findHandRows(regions, { cards: [], originX: 0, originY: 0, unitX: 1, unitY: 1 }, 3);
+    rows.forEach((row, seatIndex) => {
       row.forEach((card, cardIndex) => {
         const reading = readBoardCard(imageData, card, cardIndex, templates);
         handReadings.push({
@@ -169,8 +171,9 @@ export async function detectCards(
     readings,
     message:
       total > 0
-        ? `Read ${total} card${total === 1 ? '' : 's'} from ${slots.length} slots`
-        : 'No cards read. Check the calibration lines up with this screenshot.',
+        ? `Read ${total} card${total === 1 ? '' : 's'}` +
+          (anchor ? '' : ' (preflop — no community cards dealt)')
+        : 'No cards read. Is a hand visible in this screenshot?',
   };
 }
 
