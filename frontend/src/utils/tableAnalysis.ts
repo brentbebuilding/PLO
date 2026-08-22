@@ -373,8 +373,11 @@ export function findHandRows(
     else rows.push([card]);
   }
 
+  // A hand is at most four cards. A longer run is something else that happens
+  // to sit in a line — the status bar along the bottom of the client reads as
+  // twenty "cards" otherwise.
   const usable = rows
-    .filter(r => r.length >= minCards)
+    .filter(r => r.length >= minCards && r.length <= 5)
     .map(r => r.sort((a, b) => a.x - b.x));
 
   // When the hands panel is open it lists every revealed hand, and the same
