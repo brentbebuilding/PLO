@@ -130,21 +130,27 @@ function App() {
     setSelected(advance(selected));
   };
 
-  /** Clear the selected slot rather than replacing it. */
-  const clearSlot = () => {
-    if (!selected) return;
-    if (selected.group === 'board') {
-      setBoard(prev => prev.map((c, i) => (i === selected.index ? null : c)));
-    } else if (selected.group === 'dead') {
-      setDead(prev => prev.map((c, i) => (i === selected.index ? null : c)));
+  /**
+   * Select a slot, emptying it on the way.
+   *
+   * Clicking a card you can see is a request to change it, so the card is
+   * returned to the deck and the slot left waiting — one click to undo, one to
+   * replace, instead of selecting and then hunting for a clear button.
+   */
+  const selectSlot = (slot: SlotRef) => {
+    if (slot.group === 'board') {
+      setBoard(prev => prev.map((c, i) => (i === slot.index ? null : c)));
+    } else if (slot.group === 'dead') {
+      setDead(prev => prev.map((c, i) => (i === slot.index ? null : c)));
     } else {
-      const seat = selected.group;
+      const seat = slot.group;
       setSeats(prev =>
         prev.map((hand, s) =>
-          s === seat ? hand.map((c, i) => (i === selected.index ? null : c)) : hand
+          s === seat ? hand.map((c, i) => (i === slot.index ? null : c)) : hand
         )
       );
     }
+    setSelected(slot);
   };
 
   const newHand = () => {
@@ -296,23 +302,13 @@ function App() {
                 />
               </div>
 
-              <div className="flex gap-2">
-                <button
-                  onClick={newHand}
-                  className="flex-1 px-2 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-xs font-medium flex items-center justify-center gap-1.5"
-                >
-                  <RefreshCw size={13} />
-                  New Hand
-                </button>
-                <button
-                  onClick={clearSlot}
-                  disabled={!selected}
-                  className="px-2 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-xs"
-                  title="Empty the selected slot"
-                >
-                  Clear
-                </button>
-              </div>
+              <button
+                onClick={newHand}
+                className="w-full px-2 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-xs font-medium flex items-center justify-center gap-1.5"
+              >
+                <RefreshCw size={13} />
+                New Hand
+              </button>
 
               {readNote && !error && (
                 <div className="text-[11px] text-neutral-400">{readNote}</div>
@@ -340,7 +336,7 @@ function App() {
               seats={seats}
               board={board}
               selected={selected}
-              onSelect={setSelected}
+              onSelect={selectSlot}
               equity={seatEquity}
             />
           </div>
@@ -354,7 +350,7 @@ function App() {
                   card={card}
                   size="small"
                   selected={sameSlot(selected, { group: 'dead', index: i })}
-                  onClick={() => setSelected({ group: 'dead', index: i })}
+                  onClick={() => selectSlot({ group: 'dead', index: i })}
                 />
               ))}
             </div>
@@ -363,7 +359,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 5.2
+        Runs entirely in your browser · nothing is uploaded · VERSION 5.3
       </footer>
     </div>
   );
