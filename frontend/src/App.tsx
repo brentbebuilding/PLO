@@ -229,9 +229,19 @@ function App() {
 
   return (
     <div
-      className="h-screen flex flex-col bg-neutral-950 text-white overflow-hidden"
+      className={`h-screen flex flex-col bg-neutral-950 text-white ${
+        // Out wide the layout holds its shape rather than rearranging itself
+        // as the window narrows: past the point where the deck would fold from
+        // two rows to four and the dropzone would drop below it, the page just
+        // runs off the edge and scrolls. Things staying where they are is
+        // worth more than everything being on screen. The phone layout is
+        // different and reflows as it should.
+        isNarrow ? 'overflow-hidden' : 'overflow-x-auto overflow-y-hidden'
+      }`}
       style={
-        (isNarrow
+        ({
+          minWidth: isNarrow ? undefined : '1060px',
+          ...(isNarrow
           ? {
               // Solved from what has to fit across rather than guessed. The
               // binding constraint is that a side hand must not reach the
@@ -272,7 +282,8 @@ function App() {
               // The dead row is reference, not the thing being read, so it
               // keeps its own size rather than growing with the table.
               '--dead-card-w': 'clamp(16px, min(1.8vw, 2.9vh), 28px)',
-            }) as React.CSSProperties
+            }),
+        }) as React.CSSProperties
       }
     >
       <header className="px-4 py-2 flex items-center justify-between border-b border-neutral-800 shrink-0">
@@ -410,7 +421,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 8.3
+        Runs entirely in your browser · nothing is uploaded · VERSION 8.4
       </footer>
     </div>
   );
