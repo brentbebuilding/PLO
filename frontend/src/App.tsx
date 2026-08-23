@@ -254,6 +254,7 @@ function App() {
               // hero's, which caps a seat card at 0.072 of the felt's width.
               // The deck rail is thirteen cards with a pixel between.
               '--rail-card-w': 'clamp(15px, calc((100vw - 48px) / 13), 30px)',
+              '--rail-card-h': 'calc(var(--rail-card-w) * 1.26)',
               '--seat-card-w': 'clamp(20px, calc((100vw - 24px) * 0.072), 34px)',
               '--board-card-w': 'clamp(24px, calc((100vw - 24px) * 0.083), 40px)',
               '--dead-card-w': 'clamp(16px, 5.5vw, 28px)',
@@ -262,6 +263,7 @@ function App() {
               // Card sizes track whichever of width or height is tighter, so
               // the table, deck and dead cards all stay inside one viewport.
               '--rail-card-w': 'clamp(17px, min(1.9vw, 3.1vh), 30px)',
+              '--rail-card-h': 'calc(var(--rail-card-w) * 1.4)',
               '--seat-card-w': 'clamp(30px, min(4.0vw, 6.4vh), 64px)',
               '--board-card-w': 'clamp(34px, min(4.8vw, 7.6vh), 78px)',
               // The dead row is reference, not the thing being read, so it
@@ -291,7 +293,14 @@ function App() {
           <div className="flex flex-wrap gap-3 items-start justify-between shrink-0">
             <CardRail used={usedCards} onPick={placeCard} disabled={!selected} />
 
-            <div className="flex flex-col gap-1.5 min-w-[180px] flex-1 max-w-[240px]">
+            <div
+              className={`flex flex-col gap-1.5 ${
+                isNarrow ? 'w-full' : 'min-w-[180px] flex-1 max-w-[240px]'
+              }`}
+            >
+              {/* Side by side on a phone. Stacked they cost 60px of height
+                  that the table needs more than they do. */}
+              <div className={isNarrow ? 'flex gap-2 items-stretch' : 'contents'}>
               <div
                 onDragOver={e => e.preventDefault()}
                 onDrop={e => {
@@ -299,7 +308,9 @@ function App() {
                   if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]);
                 }}
                 onClick={() => document.getElementById('shot-input')?.click()}
-                className="border-2 border-dashed border-neutral-500 hover:border-neutral-300 rounded-lg p-2 text-center cursor-pointer bg-black/20 transition-colors"
+                className={`border-2 border-dashed border-neutral-500 hover:border-neutral-300 rounded-lg p-2 text-center cursor-pointer bg-black/20 transition-colors ${
+                  isNarrow ? 'flex-1 min-w-0' : ''
+                }`}
               >
                 {isReading ? (
                   <div className="flex items-center justify-center gap-2 text-sm text-neutral-300 py-2">
@@ -330,11 +341,14 @@ function App() {
 
               <button
                 onClick={newHand}
-                className="w-full px-2 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-xs font-medium flex items-center justify-center gap-1.5"
+                className={`px-3 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-xs font-medium flex items-center justify-center gap-1.5 ${
+                  isNarrow ? 'shrink-0 whitespace-nowrap' : 'w-full'
+                }`}
               >
                 <RefreshCw size={13} />
                 New Hand
               </button>
+              </div>
 
               {readNote && !error && (
                 <div className="text-[11px] text-neutral-400">{readNote}</div>
@@ -387,7 +401,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 7.8
+        Runs entirely in your browser · nothing is uploaded · VERSION 7.9
       </footer>
     </div>
   );

@@ -28,11 +28,11 @@ export const SEAT_POSITIONS = [
  */
 const COMPACT_SEAT_POSITIONS = [
   { top: '0%', left: '50%', transform: 'translateX(-50%)' },   // hero, top centre
-  { top: '21%', left: '82%', transform: 'translateX(-50%)' },  // upper right
-  { top: '58%', left: '82%', transform: 'translateX(-50%)' },  // lower right
-  { top: '79%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
-  { top: '58%', left: '18%', transform: 'translateX(-50%)' },  // lower left
-  { top: '21%', left: '18%', transform: 'translateX(-50%)' },  // upper left
+  { top: '22%', left: '82%', transform: 'translateX(-50%)' },  // upper right
+  { top: '60%', left: '82%', transform: 'translateX(-50%)' },  // lower right
+  { top: '80%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
+  { top: '60%', left: '18%', transform: 'translateX(-50%)' },  // lower left
+  { top: '22%', left: '18%', transform: 'translateX(-50%)' },  // upper left
 ];
 
 /*
