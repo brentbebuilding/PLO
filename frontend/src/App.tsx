@@ -45,7 +45,9 @@ function App() {
   const [tableHeight, setTableHeight] = useState(400);
 
   const [selected, setSelected] = useState<SlotRef | null>({ group: 0, index: 0 });
-  const [equity, setEquity] = useState<{ players: DisplayResult[]; stage: Stage } | null>(null);
+  const [equity, setEquity] = useState<
+    { players: DisplayResult[]; stage: Stage; boards: number } | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
 
   const [screenshot, setScreenshot] = useState<string | null>(null);
@@ -86,8 +88,7 @@ function App() {
       try {
         const result: SimulationResult = calculateEquity(
           complete,
-          board.filter((c): c is Card => c !== null),
-          10000
+          board.filter((c): c is Card => c !== null)
         );
         // Map back to seat numbers so the labels match the table.
         const seatOf = seats
@@ -95,6 +96,7 @@ function App() {
           .filter(i => i >= 0);
         setEquity({
           stage: result.stage as Stage,
+          boards: result.boardsEvaluated,
           players: result.players.map((p, i) => ({
             playerIndex: seatOf[i],
             cards: p.cards,
@@ -325,7 +327,8 @@ function App() {
 
               {equity && (
                 <div className="text-[11px] text-neutral-400">
-                  10,000 simulations · {stage}
+                  exact · {equity.boards.toLocaleString()}{' '}
+                  {equity.boards === 1 ? 'board' : 'boards'} · {stage}
                 </div>
               )}
             </div>
@@ -363,7 +366,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 6.3
+        Runs entirely in your browser · nothing is uploaded · VERSION 7.0
       </footer>
     </div>
   );
