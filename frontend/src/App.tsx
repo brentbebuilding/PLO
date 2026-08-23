@@ -186,6 +186,10 @@ function App() {
 
       setSeats(nextSeats);
       setBoard(nextBoard);
+
+      // Land on the first gap the read left behind. Hands the client didn't
+      // show get typed in, so putting the cursor there saves hunting for it.
+      setSelected(firstEmptySlot(nextSeats, nextBoard));
       setReadNote(result.message ?? null);
       if (!result.success) setError(result.message ?? 'Nothing could be read.');
     } catch (e) {
@@ -359,10 +363,32 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 5.6
+        Runs entirely in your browser · nothing is uploaded · VERSION 5.7
       </footer>
     </div>
   );
+}
+
+/**
+ * First slot a read left unfilled, scanning the user's seat, then the board,
+ * then the other seats. Falls back to the user's first card when nothing is
+ * missing, which is also the right place to start on an empty table.
+ */
+function firstEmptySlot(seats: (Card | null)[][], board: (Card | null)[]): SlotRef {
+  const heroGap = seats[0]?.findIndex(c => c === null) ?? -1;
+  if (heroGap >= 0 && seats[0].some(c => c !== null)) return { group: 0, index: heroGap };
+
+  const boardGap = board.findIndex(c => c === null);
+  if (boardGap >= 0 && board.some(c => c !== null)) return { group: 'board', index: boardGap };
+
+  for (let seat = 1; seat < seats.length; seat++) {
+    if (!seats[seat].some(c => c !== null)) continue;
+    const gap = seats[seat].findIndex(c => c === null);
+    if (gap >= 0) return { group: seat, index: gap };
+  }
+
+  if (heroGap >= 0) return { group: 0, index: heroGap };
+  return { group: 0, index: 0 };
 }
 
 /** Step to the next slot, so a hand can be entered without re-clicking. */
