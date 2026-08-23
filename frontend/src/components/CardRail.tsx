@@ -42,7 +42,7 @@ export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled }) =>
                       width: 'var(--rail-card-w)',
                       height: 'calc(var(--rail-card-w) * 1.62)',
                     }}
-                    className={`rounded-sm bg-white border border-neutral-400 overflow-hidden transition-opacity ${
+                    className={`rounded-sm border border-black/50 overflow-hidden transition-opacity ${
                       taken
                         ? 'opacity-30 cursor-not-allowed'
                         : disabled

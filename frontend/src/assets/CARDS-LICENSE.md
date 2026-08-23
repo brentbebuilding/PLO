@@ -23,7 +23,7 @@ Nothing else from the deck ships here. The court cards in the original are
 traced artwork — `queen_of_hearts.svg` alone is 622 KB, and the full set runs to
 roughly 7 MB. At the sizes this app draws cards (the deck rail is 17–30 px
 wide) that detail is invisible anyway, so the card faces are drawn as
-large-index faces: white ground, big coloured rank, pip beneath.
+large-index faces: solid suit-coloured ground, big white rank, pip beneath.
 
 ## Deliberately not used
 
