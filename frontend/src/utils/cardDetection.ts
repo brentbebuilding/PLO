@@ -124,9 +124,15 @@ export async function detectCards(
       ? findHandRows(regions, anchor, 2, imageData)
       : findHandRows(regions, { cards: [], originX: 0, originY: 0, unitX: 1, unitY: 1 }, 3, imageData);
     // The user always sits bottom-centre, so whichever row's avatar is drawn
-    // there is theirs. Falls back to the first row when no confident match.
+    // there is theirs.
+    //
+    // When no row matches confidently, no row is treated as the user's. The
+    // previous fallback to the first row put an opponent's cards in the user's
+    // seat with nothing to say it had guessed, which is worse than leaving the
+    // seat empty for them to fill in: a wrong hand quietly produces a wrong
+    // equity, a missing one is obvious.
     const hero = findHeroRow(imageData, rows);
-    const heroRow = hero ? hero.row : 0;
+    const heroRow = hero ? hero.row : -1;
 
     let opponentSeat = 0;
     rows.forEach((row, seatIndex) => {
@@ -188,7 +194,12 @@ export async function detectCards(
     message:
       total > 0
         ? `Read ${total} card${total === 1 ? '' : 's'}` +
-          (anchor ? '' : ' (preflop — no community cards dealt)')
+          (anchor ? '' : ' (preflop — no community cards dealt)') +
+          // Say so rather than leaving them to notice the empty seat, since
+          // the hands that did read look no different either way.
+          (hero.length === 0 && villains.length > 0
+            ? " — couldn't tell which hand is yours, so add it yourself"
+            : '')
         : 'No cards read. Is a hand visible in this screenshot?',
   };
 }

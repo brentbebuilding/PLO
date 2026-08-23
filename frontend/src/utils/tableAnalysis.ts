@@ -713,6 +713,48 @@ function panelAvatarBox(row: CardRegion[]) {
 /** Below this correlation the match is not trusted and no hero is claimed. */
 const HERO_MIN_CORRELATION = 0.8;
 
+/**
+ * How far into the image the hands panel can start, as a fraction of width.
+ *
+ * Measured across the screenshots: every panel row begins at 0.13 of the image
+ * width, every row of cards lying on the felt at 0.46 or beyond.
+ */
+const PANEL_MAX_ORIGIN = 0.25;
+
+/**
+ * Narrow a set of rows to the ones actually drawn in the hands panel.
+ *
+ * Row detection also picks up cards lying on the felt, and an avatar box
+ * measured off one of those lands on table rather than on a face. Those crops
+ * are not blank — a green felt edge against the dark panel carries more
+ * contrast than a real avatar does — so they correlate at 0.86 and upwards
+ * against any similar patch of table, comfortably past the threshold for
+ * claiming a hero. Excluding them here is what stops that.
+ *
+ * Rows are picked out by where they start rather than by how many cards they
+ * hold. A panel row nominally shows a whole Omaha hand, but detection returns
+ * three regions when a card fails to separate and five when something else on
+ * the table gets swept into the row, so counting them is unreliable. The left
+ * edge is not: the panel is a column, and every row in it begins at the same x.
+ */
+function panelRows(rows: CardRegion[][], imageWidth: number): number[] {
+  const left = rows
+    .map((_, i) => i)
+    .filter(i => rows[i][0].x < imageWidth * PANEL_MAX_ORIGIN);
+  if (left.length <= 1) return left;
+
+  // Group by left edge and keep the largest group, so that a stray region far
+  // down the panel's own column can't drag the set sideways. Ties go to the
+  // leftmost, the panel being the leftmost thing on the table.
+  const bucket = (i: number) => Math.round(rows[i][0].x / 8) * 8;
+  const counts = new Map<number, number>();
+  for (const i of left) counts.set(bucket(i), (counts.get(bucket(i)) ?? 0) + 1);
+  const origin = [...counts.entries()].sort(
+    (a, b) => b[1] - a[1] || a[0] - b[0]
+  )[0][0];
+  return left.filter(i => bucket(i) === origin);
+}
+
 export interface HeroMatch {
   /** Index into the rows passed in. */
   row: number;
@@ -732,22 +774,27 @@ export interface HeroMatch {
  * across the bottom-centre of the table, over position and scale, and whichever
  * row is found there is the user's. The seat is universal, so this works for any
  * player without knowing their name or picture.
+ *
+ * A single panel row is still matched rather than assumed to be the user's: the
+ * client will happily show one opponent's hand and none of the user's.
  */
 export function findHeroRow(
   image: PixelSource,
   rows: CardRegion[][]
 ): HeroMatch | null {
-  if (rows.length === 0) return null;
-  if (rows.length === 1) return { row: 0, correlation: 1 };
+  const candidates = panelRows(rows, image.width);
+  if (candidates.length === 0) return null;
 
   const integral = buildIntegral(image);
-  const panels = rows.map(row => {
-    const box = panelAvatarBox(row);
+  const panels = candidates.map(i => {
+    const box = panelAvatarBox(rows[i]);
     return avatarSignature(integral, box.x, box.y, box.w, box.h);
   });
 
-  const baseW = panelAvatarBox(rows[0]).w;
-  const baseH = panelAvatarBox(rows[0]).h;
+  // Anchored on a panel row, not just the first row of any kind: a stray pair
+  // of cards on the felt has its own card height, and starting the scale sweep
+  // from that overshoots or undershoots the real avatar everywhere.
+  const base = panelAvatarBox(rows[candidates[0]]);
   const centreX = image.width / 2;
 
   let best: HeroMatch | null = null;
@@ -756,14 +803,16 @@ export function findHeroRow(
   // The table avatar is drawn larger than the panel thumbnail, and by how much
   // depends on the window size, so scale is searched rather than assumed.
   for (let scale = 1.0; scale <= 2.2; scale += 0.15) {
-    const w = baseW * scale;
-    const h = baseH * scale;
+    const w = base.w * scale;
+    const h = base.h * scale;
     for (let y = image.height * 0.52; y < image.height * 0.78 - h; y += step) {
       for (let dx = -w * 0.9; dx <= w * 0.9; dx += step) {
         const probe = avatarSignature(integral, centreX + dx - w / 2, y, w, h);
         for (let i = 0; i < panels.length; i++) {
           const c = correlate(probe, panels[i]);
-          if (!best || c > best.correlation) best = { row: i, correlation: c };
+          if (!best || c > best.correlation) {
+            best = { row: candidates[i], correlation: c };
+          }
         }
       }
     }
