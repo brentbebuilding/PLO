@@ -52,11 +52,11 @@ export const CardSlot: React.FC<CardSlotProps> = ({ card, selected, size = 'norm
   return (
     <button
       onClick={onClick}
-      style={{ width: w, height: `calc(${w} * 1.55)` }}
-      className={`rounded border flex flex-col items-center justify-center leading-none shrink-0 overflow-hidden transition-all ${
+      style={{ width: w, height: `calc(${w} * 1.4)` }}
+      className={`rounded border-2 flex flex-col items-center justify-center leading-none shrink-0 overflow-hidden transition-all ${
         card
-          ? 'border-black/50'
-          : 'bg-rose-900/70 border-rose-950 text-rose-700/60'
+          ? 'border-white'
+          : 'bg-rose-900/70 border-rose-200/70 text-rose-300/50'
       } ${
         selected
           ? 'ring-2 ring-yellow-300 border-yellow-300 scale-105'

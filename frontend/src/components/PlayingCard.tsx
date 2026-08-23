@@ -4,12 +4,11 @@ import { SUIT_COLORS, SUIT_PIPS } from '../assets/cardPips';
 /**
  * One card face.
  *
- * Solid suit-coloured ground, big white rank, pip tucked underneath — not a
- * French-suited face with a pip layout and court art. The deck rail draws
- * cards 17–30 px wide, where a traditional corner index lands at around four
- * pixels tall and stops being readable. The rank and the colour are the only
- * things anyone needs off a card here, so the rank gets most of the face and
- * the colour carries the suit.
+ * Solid suit-coloured ground with a white edge: a small corner index at the
+ * top left — rank over pip, the way a real card is indexed — and the rank
+ * again, large, filling the lower half. Not a French-suited face with a pip
+ * layout and court art. The rank is what gets read at a glance, so it gets the
+ * room; the colour carries the suit.
  *
  * Everything scales off `width`, which is passed in as a CSS length (usually
  * one of the --*-card-w variables), so a single face serves the rail, the
@@ -18,18 +17,18 @@ import { SUIT_COLORS, SUIT_PIPS } from '../assets/cardPips';
 interface PipProps {
   suit: Suit;
   size: string;
-  /** Space above the pip, as a CSS length. */
-  gap?: string;
+  style?: React.CSSProperties;
 }
 
-export const SuitPip: React.FC<PipProps> = ({ suit, size, gap }) => {
+export const SuitPip: React.FC<PipProps> = ({ suit, size, style }) => {
   const pip = SUIT_PIPS[suit];
   return (
     <svg
       viewBox={pip.viewBox}
-      width={size}
-      height={size}
-      style={{ display: 'block', fill: 'currentColor', marginTop: gap }}
+      // Sized through CSS rather than the width/height attributes: those are
+      // presentation attributes and don't accept calc(), which every caller
+      // here passes.
+      style={{ display: 'block', fill: 'currentColor', width: size, height: size, ...style }}
       aria-hidden="true"
     >
       <path d={pip.d} />
@@ -37,32 +36,78 @@ export const SuitPip: React.FC<PipProps> = ({ suit, size, gap }) => {
   );
 };
 
+const FONT = 'ui-sans-serif, system-ui, -apple-system, Arial, sans-serif';
+
 interface PlayingCardProps {
   card: Card;
   /** CSS length; the height and every glyph inside are derived from it. */
   width: string;
+  /**
+   * Deck-rail cards are drawn barely 20px wide, where a corner index and a
+   * large rank would both be illegible. Those stack a single pip over a single
+   * rank instead.
+   */
+  compact?: boolean;
 }
 
-export const PlayingCard: React.FC<PlayingCardProps> = ({ card, width }) => {
+export const PlayingCard: React.FC<PlayingCardProps> = ({ card, width, compact }) => {
   const label = card.rank === 'T' ? '10' : card.rank;
+  const narrow = card.rank === 'T';
+
+  if (compact) {
+    return (
+      <span
+        className="flex flex-col items-center justify-center w-full h-full leading-none select-none text-white"
+        style={{ background: SUIT_COLORS[card.suit] }}
+      >
+        <SuitPip suit={card.suit} size={`calc(${width} * 0.4)`} />
+        <span
+          className="font-bold tracking-tight"
+          style={{
+            fontSize: `calc(${width} * ${narrow ? 0.44 : 0.56})`,
+            marginTop: `calc(${width} * 0.06)`,
+            fontFamily: FONT,
+          }}
+        >
+          {label}
+        </span>
+      </span>
+    );
+  }
+
   return (
     <span
-      className="flex flex-col items-center justify-center w-full h-full leading-none select-none text-white"
+      className="relative block w-full h-full leading-none select-none text-white"
       style={{ background: SUIT_COLORS[card.suit] }}
     >
       <span
-        className="font-bold tracking-tighter"
+        className="absolute flex flex-col items-center font-bold tracking-tight"
         style={{
-          // "10" is twice as wide as every other rank, so it gets its own size
-          // rather than being allowed to touch the card edges.
-          fontSize: `calc(${width} * ${card.rank === 'T' ? 0.59 : 0.76})`,
-          fontFamily: 'ui-sans-serif, system-ui, -apple-system, Arial, sans-serif',
+          top: `calc(${width} * 0.04)`,
+          left: `calc(${width} * 0.07)`,
+          fontSize: `calc(${width} * ${narrow ? 0.2 : 0.26})`,
+          fontFamily: FONT,
+        }}
+      >
+        {label}
+        <SuitPip
+          suit={card.suit}
+          size={`calc(${width} * 0.22)`}
+          style={{ marginTop: `calc(${width} * 0.03)` }}
+        />
+      </span>
+      <span
+        className="absolute inset-x-0 text-center font-bold tracking-tighter"
+        style={{
+          // Held clear of the bottom edge so the descender on a J or Q isn't
+          // clipped by the card.
+          bottom: `calc(${width} * 0.07)`,
+          fontSize: `calc(${width} * ${narrow ? 0.56 : 0.72})`,
+          fontFamily: FONT,
         }}
       >
         {label}
       </span>
-      {/* The gap keeps the descender on a J or Q off the top of the pip. */}
-      <SuitPip suit={card.suit} size={`calc(${width} * 0.28)`} gap={`calc(${width} * 0.1)`} />
     </span>
   );
 };

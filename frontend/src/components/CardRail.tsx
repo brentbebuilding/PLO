@@ -40,9 +40,9 @@ export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled }) =>
                     title={taken ? 'Already in play' : undefined}
                     style={{
                       width: 'var(--rail-card-w)',
-                      height: 'calc(var(--rail-card-w) * 1.62)',
+                      height: 'calc(var(--rail-card-w) * 1.4)',
                     }}
-                    className={`rounded-sm border border-black/50 overflow-hidden transition-opacity ${
+                    className={`rounded-sm border border-black/40 overflow-hidden transition-opacity ${
                       taken
                         ? 'opacity-30 cursor-not-allowed'
                         : disabled
@@ -50,7 +50,7 @@ export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled }) =>
                         : 'hover:ring-2 hover:ring-yellow-300 cursor-pointer'
                     }`}
                   >
-                    <PlayingCard card={{ rank, suit }} width="var(--rail-card-w)" />
+                    <PlayingCard card={{ rank, suit }} width="var(--rail-card-w)" compact />
                   </button>
                 );
               })}
