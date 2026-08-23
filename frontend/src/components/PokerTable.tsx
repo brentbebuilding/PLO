@@ -6,14 +6,18 @@ import { PlayingCard } from './PlayingCard';
  *
  * The user is always at the top, so their cards read first. The remaining five
  * are placed around the oval the way a real table seats them.
+ *
+ * The ring sits low enough in the box that the hero's hand rests on the felt's
+ * top edge rather than floating above it, and the bottom seat reaches the
+ * felt's lower edge instead of leaving a band of empty green under it.
  */
 export const SEAT_POSITIONS = [
-  { top: '1%', left: '50%', transform: 'translateX(-50%)' },   // hero, top centre
-  { top: '21%', left: '82%', transform: 'translateX(-50%)' },  // upper right
-  { top: '59%', left: '82%', transform: 'translateX(-50%)' },  // lower right
-  { top: '68%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
-  { top: '59%', left: '18%', transform: 'translateX(-50%)' },  // lower left
-  { top: '21%', left: '18%', transform: 'translateX(-50%)' },  // upper left
+  { top: '4%', left: '50%', transform: 'translateX(-50%)' },   // hero, top centre
+  { top: '22%', left: '82%', transform: 'translateX(-50%)' },  // upper right
+  { top: '61%', left: '82%', transform: 'translateX(-50%)' },  // lower right
+  { top: '72%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
+  { top: '61%', left: '18%', transform: 'translateX(-50%)' },  // lower left
+  { top: '22%', left: '18%', transform: 'translateX(-50%)' },  // upper left
 ];
 
 /**
@@ -194,9 +198,11 @@ export const PokerTable: React.FC<PokerTableProps> = ({
         {seatIndex === 0 && (
           <span
             style={{
-              fontSize: 'calc(var(--seat-card-w) * 0.3)',
-              // Clear of the cards by its own height, whatever that scales to.
-              bottom: 'calc(100% + var(--seat-card-w) * 0.08)',
+              fontSize: 'calc(var(--seat-card-w) * 0.28)',
+              // Just clear of the cards. The hero sits at the very top of the
+              // ring, so anything more and the label leaves the table box and
+              // lands on whatever is above it — the deck, as it turned out.
+              bottom: 'calc(100% + 2px)',
             }}
             className="absolute left-1/2 -translate-x-1/2 font-medium text-emerald-300 whitespace-nowrap"
           >
