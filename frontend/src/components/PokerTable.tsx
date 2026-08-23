@@ -1,4 +1,5 @@
-import { Card, Suit } from '../types';
+import { Card } from '../types';
+import { PlayingCard } from './PlayingCard';
 
 /**
  * Where each hand sits around the felt, as percentages of the table box.
@@ -21,15 +22,6 @@ const READOUT_ABOVE = [false, false, false, true, true, false];
 export const SEAT_COUNT = SEAT_POSITIONS.length;
 export const CARDS_PER_SEAT = 4;
 export const BOARD_SIZE = 5;
-
-const SUIT_STYLE: Record<Suit, string> = {
-  s: 'bg-neutral-900 border-neutral-600',
-  h: 'bg-red-800 border-red-600',
-  d: 'bg-blue-800 border-blue-600',
-  c: 'bg-green-800 border-green-600',
-};
-
-const SUIT_PIP: Record<Suit, string> = { s: '♠', h: '♥', d: '♦', c: '♣' };
 
 export interface SlotRef {
   /** A seat index, 'board', or 'dead'. */
@@ -61,23 +53,18 @@ export const CardSlot: React.FC<CardSlotProps> = ({ card, selected, size = 'norm
     <button
       onClick={onClick}
       style={{ width: w, height: `calc(${w} * 1.55)` }}
-      className={`rounded border-2 flex flex-col items-center justify-center leading-none shrink-0 transition-all ${
+      className={`rounded border flex flex-col items-center justify-center leading-none shrink-0 overflow-hidden transition-all ${
         card
-          ? `${SUIT_STYLE[card.suit]} text-white`
+          ? 'bg-white border-neutral-400'
           : 'bg-rose-900/70 border-rose-950 text-rose-700/60'
       } ${
         selected
           ? 'ring-2 ring-yellow-300 border-yellow-300 scale-105'
-          : 'hover:brightness-125'
+          : 'hover:brightness-110'
       }`}
     >
       {card ? (
-        <>
-          <span style={{ fontSize: `calc(${w} * 0.34)` }}>{SUIT_PIP[card.suit]}</span>
-          <span className="font-semibold" style={{ fontSize: `calc(${w} * 0.46)` }}>
-            {card.rank === 'T' ? '10' : card.rank}
-          </span>
-        </>
+        <PlayingCard card={card} width={w} />
       ) : (
         <span style={{ fontSize: `calc(${w} * 0.5)` }}>✦</span>
       )}
