@@ -38,6 +38,21 @@ export const SuitPip: React.FC<PipProps> = ({ suit, size, style }) => {
 
 const FONT = 'ui-sans-serif, system-ui, -apple-system, Arial, sans-serif';
 
+/**
+ * The rank, drawn at the same size whatever the rank is.
+ *
+ * A ten is the only two-character rank, so it is the only one that has to be
+ * made to fit. Shrinking the font to do that leaves it visibly shorter than
+ * every other card; squeezing it horizontally instead keeps the cap height
+ * identical down the row, which is what the eye actually reads.
+ */
+const RankLabel: React.FC<{ rank: Card['rank'] }> = ({ rank }) =>
+  rank === 'T' ? (
+    <span style={{ display: 'inline-block', transform: 'scaleX(0.68)' }}>10</span>
+  ) : (
+    <>{rank}</>
+  );
+
 interface PlayingCardProps {
   card: Card;
   /** CSS length; the height and every glyph inside are derived from it. */
@@ -51,9 +66,6 @@ interface PlayingCardProps {
 }
 
 export const PlayingCard: React.FC<PlayingCardProps> = ({ card, width, compact }) => {
-  const label = card.rank === 'T' ? '10' : card.rank;
-  const narrow = card.rank === 'T';
-
   if (compact) {
     return (
       <span
@@ -64,12 +76,12 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({ card, width, compact }
         <span
           className="font-bold tracking-tight"
           style={{
-            fontSize: `calc(${width} * ${narrow ? 0.44 : 0.56})`,
+            fontSize: `calc(${width} * 0.56)`,
             marginTop: `calc(${width} * 0.06)`,
             fontFamily: FONT,
           }}
         >
-          {label}
+          <RankLabel rank={card.rank} />
         </span>
       </span>
     );
@@ -85,11 +97,11 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({ card, width, compact }
         style={{
           top: `calc(${width} * 0.04)`,
           left: `calc(${width} * 0.07)`,
-          fontSize: `calc(${width} * ${narrow ? 0.2 : 0.26})`,
+          fontSize: `calc(${width} * 0.26)`,
           fontFamily: FONT,
         }}
       >
-        {label}
+        <RankLabel rank={card.rank} />
         <SuitPip
           suit={card.suit}
           size={`calc(${width} * 0.22)`}
@@ -102,11 +114,11 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({ card, width, compact }
           // Held clear of the bottom edge so the descender on a J or Q isn't
           // clipped by the card.
           bottom: `calc(${width} * 0.07)`,
-          fontSize: `calc(${width} * ${narrow ? 0.56 : 0.72})`,
+          fontSize: `calc(${width} * 0.72)`,
           fontFamily: FONT,
         }}
       >
-        {label}
+        <RankLabel rank={card.rank} />
       </span>
     </span>
   );
