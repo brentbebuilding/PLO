@@ -146,9 +146,16 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       // width to spare and the page can run on downwards — so the felt is
       // nearly square and the ring spreads down instead.
       aspectRatio: compact ? '23 / 20' : '21 / 10',
+      // The height left over is the window less the fixed band of header,
+      // deck, dead row and footer around it. Measuring that band at runtime
+      // and feeding it back in through a variable was the obvious way to do
+      // it and the wrong one: the measurement can arrive late, and while it is
+      // stale the felt is sized for one width and the cards for another, which
+      // puts the side hands through the board. Card sizes are capped off the
+      // same expression, so the two cannot disagree.
       width: compact
-        ? 'min(100%, calc(var(--table-h) * 1.15))'
-        : 'min(100%, calc(var(--table-h) * 2.1))',
+        ? 'min(100%, calc((100vh - 415px) * 1.15))'
+        : 'min(100%, calc((100vh - 300px) * 2.1))',
       maxHeight: '100%',
     }}
   >

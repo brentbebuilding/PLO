@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card } from './types';
 import { calculateEquity, SimulationResult } from './utils/equity';
 import { detectCards } from './utils/cardDetection';
@@ -42,8 +42,6 @@ function App() {
     Array.from({ length: DEAD_CARD_SLOTS }, () => null)
   );
 
-  const tableAreaRef = useRef<HTMLDivElement>(null);
-  const [tableHeight, setTableHeight] = useState(400);
   const isNarrow = useIsNarrow();
 
   const [selected, setSelected] = useState<SlotRef | null>({ group: 0, index: 0 });
@@ -214,20 +212,6 @@ function App() {
     [readScreenshot]
   );
 
-  // The table fills whatever height is left once everything else is placed.
-  useEffect(() => {
-    const el = tableAreaRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(entries => {
-      for (const entry of entries) setTableHeight(entry.contentRect.height);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-    // Re-runs when the layout switches: the element the observer needs only
-    // exists in the wide layout, so rotating a phone into landscape has to
-    // attach it rather than leave the table sized from a stale measurement.
-  }, [isNarrow]);
-
   // Paste anywhere on the page drops a screenshot in.
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -255,8 +239,13 @@ function App() {
               // The deck rail is thirteen cards with a pixel between.
               '--rail-card-w': 'clamp(15px, calc((100vw - 48px) / 13), 30px)',
               '--rail-card-h': 'calc(var(--rail-card-w) * 1.26)',
-              '--seat-card-w': 'clamp(20px, calc((100vw - 24px) * 0.072), 34px)',
-              '--board-card-w': 'clamp(24px, calc((100vw - 24px) * 0.083), 40px)',
+              // Capped by the felt too, which on a phone is the page width or
+              // 1.15x the height left over, whichever is smaller. The chrome
+              // above and below runs to 415px there, the deck being four rows.
+              '--seat-card-w':
+                'clamp(20px, min(calc((100vw - 24px) * 0.072), calc((100vh - 415px) * 0.0828)), 34px)',
+              '--board-card-w':
+                'clamp(24px, min(calc((100vw - 24px) * 0.083), calc((100vh - 415px) * 0.0955)), 40px)',
               '--dead-card-w': 'clamp(16px, 5.5vw, 28px)',
             }
           : {
@@ -264,8 +253,22 @@ function App() {
               // the table, deck and dead cards all stay inside one viewport.
               '--rail-card-w': 'clamp(17px, min(1.9vw, 3.1vh), 30px)',
               '--rail-card-h': 'calc(var(--rail-card-w) * 1.4)',
-              '--seat-card-w': 'clamp(30px, min(4.0vw, 6.4vh), 64px)',
-              '--board-card-w': 'clamp(34px, min(4.8vw, 7.6vh), 78px)',
+              // Hands are drawn at the same size as the board. The cap comes
+              // from the one thing that has to hold: a side hand reaches 2.2
+              // card widths towards the middle and the board 2.74, so 4.94 of
+              // them have to fit in the 32% of the felt between a side seat
+              // and its centre. At the widest the table gets — 1152px, where
+              // max-w-6xl stops it — that allows 74px.
+              // The felt is as wide as the page allows or 2.1x the height left
+              // over, whichever is smaller, so the cap comes off both. The
+              // height left over is the window less the 300px of header, deck,
+              // dead row and footer above and below it — a figure worth relying
+              // on only because that band is now a fixed height. Sizing from
+              // the window alone is what let a short one shrink the felt while
+              // the cards stayed put and ran through the board.
+              '--board-card-w':
+                'clamp(22px, min(calc((100vw - 24px) * 0.060), calc((100vh - 300px) * 0.126)), 72px)',
+              '--seat-card-w': 'var(--board-card-w)',
               // The dead row is reference, not the thing being read, so it
               // keeps its own size rather than growing with the table.
               '--dead-card-w': 'clamp(16px, min(1.8vw, 2.9vh), 28px)',
@@ -378,11 +381,7 @@ function App() {
             </div>
           </div>
 
-          <div
-            ref={tableAreaRef}
-            className="flex-1 min-h-0 flex items-center justify-center"
-            style={{ '--table-h': `${tableHeight}px` } as React.CSSProperties}
-          >
+          <div className="flex-1 min-h-0 flex items-center justify-center">
             <PokerTable
               seats={seats}
               board={board}
@@ -411,7 +410,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 8.2
+        Runs entirely in your browser · nothing is uploaded · VERSION 8.3
       </footer>
     </div>
   );
