@@ -346,13 +346,25 @@ export function findBoard(
  * pixels alone, so callers should treat the assignment as a suggestion.
  */
 /**
- * A row's card height, taken as the median.
+ * Split a row, sorted by x, wherever the spacing jumps.
  *
- * One clipped region shouldn't speak for the row: colour regions routinely come
- * up a few pixels short where a card meets the panel background.
+ * Cards in a hand sit at a regular pitch. A region that merely shares the
+ * row's height and top edge — one sat at x=1155 against a panel hand running
+ * 265 to 374 — arrives after a gap many times that pitch, and belongs to a
+ * different group entirely.
  */
-function rowHeight(row: CardRegion[]): number {
-  return median(row.map(c => c.height));
+function splitIntoRuns(row: CardRegion[]): CardRegion[][] {
+  if (row.length < 2) return [row];
+  const gaps = row.slice(1).map((c, i) => c.x - row[i].x);
+  const pitch = Math.min(...gaps);
+  if (pitch <= 0) return [row];
+
+  const runs: CardRegion[][] = [[row[0]]];
+  for (let i = 1; i < row.length; i++) {
+    if (row[i].x - row[i - 1].x > pitch * 2.5) runs.push([]);
+    runs[runs.length - 1].push(row[i]);
+  }
+  return runs;
 }
 
 export function findHandRows(
@@ -377,56 +389,72 @@ export function findHandRows(
     const row = rows.find(
       r =>
         Math.abs(r[0].y - card.y) < card.height * 0.35 &&
-        Math.abs(r[0].height - card.height) < card.height * 0.35
+        // Scaled by the taller of the two. A dimmed card's lower edge fades
+        // into the panel and stops registering, so heights within one row run
+        // 45, 45, 35, 32 — and whichever of the pair is clipped, the tolerance
+        // has to be judged against the card that isn't. Measuring against the
+        // candidate loses a short card joining a tall row; against the row,
+        // a tall card joining a row that happens to start short.
+        Math.abs(r[0].height - card.height) <
+          Math.max(r[0].height, card.height) * 0.35
     );
     if (row) row.push(card);
     else rows.push([card]);
   }
 
-  // A hand is at most four cards. A longer run is something else that happens
-  // to sit in a line — the status bar along the bottom of the client reads as
-  // twenty "cards" otherwise.
+  // A hand is a run of at most four cards at a regular pitch. Anything else
+  // that happens to share the row's height and top edge — a card on the felt,
+  // the status bar along the bottom of the client, which reads as twenty
+  // "cards" — is separated out by splitting each row wherever the spacing
+  // jumps, then keeping only the runs that are hand-sized. Discarding the
+  // whole row instead cost real hands: one lost four panel cards because two
+  // unrelated regions elsewhere in the image had joined them.
   const usable = rows
-    .filter(r => r.length >= minCards && r.length <= 5)
-    .map(r => r.sort((a, b) => a.x - b.x));
+    .map(r => r.sort((a, b) => a.x - b.x))
+    .flatMap(splitIntoRuns)
+    .filter(r => r.length >= minCards && r.length <= CARDS_IN_HAND);
 
   // When the hands panel is open it lists every revealed hand, and the same
   // players are also drawn at their seats — so a hand can be found twice and
   // reported as two opponents. Counting one player's cards twice is worse than
   // missing them: it removes cards from the deck that are still live.
   //
-  // The panel is recognisable as rows sharing an x origin and card size, so
-  // when two or more such rows exist they are the authoritative list and the
-  // seat copies are dropped.
-  // Grouped by left edge alone. Card size is checked afterwards, with a
-  // tolerance, rather than folded into the key: a card's colour region is
-  // routinely clipped a few pixels short, and one observed panel row whose
-  // first card registered 34px instead of 40 landed in a different bucket from
-  // its neighbours and was thrown away whole — a revealed hand lost, and the
-  // user's own hand at that.
-  const origin = (row: CardRegion[]) => Math.round(row[0].x / 8);
-  const columns = new Map<number, CardRegion[][]>();
-  for (const row of usable) {
-    const at = origin(row);
-    columns.set(at, [...(columns.get(at) ?? []), row]);
-  }
-
-  let panel: CardRegion[][] | null = null;
-  for (const group of columns.values()) {
-    if (group.length >= 2 && (!panel || group.length > panel.length)) panel = group;
-  }
-
-  let chosen = usable;
-  if (panel) {
-    // Rows in the column that are a different size are seat copies, not panel
-    // entries, so they still get dropped — just on the row's typical card
-    // height rather than on whichever card happened to come first.
-    const typical = median(panel.map(rowHeight));
-    chosen = panel.filter(row => Math.abs(rowHeight(row) - typical) <= typical * 0.3);
-  }
+  // The panel is a column down the left edge, and it is recognised by that
+  // rather than by holding two or more rows. A screenshot where only one hand
+  // was revealed has no second row to compare against, and what came through
+  // instead was the client's status bar, split into three hand-sized runs and
+  // read as three opponents.
+  //
+  // Size is deliberately not compared between rows here: dimming shortens
+  // whole rows, not just single cards, so two rows of the same panel
+  // legitimately measure 41 and 29 pixels tall and any similarity test tight
+  // enough to be worth having throws one of them away.
+  const inPanel = image
+    ? usable.filter(row => row[0].x < image.width * PANEL_MAX_ORIGIN)
+    : [];
+  const chosen = inPanel.length > 0 ? inPanel : usable;
 
   const filled = image ? chosen.map(row => fillRowGaps(row, image)) : chosen;
-  return filled.sort((a, b) => a[0].y - b[0].y);
+  return filled.map(squareUpRow).sort((a, b) => a[0].y - b[0].y);
+}
+
+/**
+ * Restore every card in a row to the row's own size.
+ *
+ * Cards in a row are drawn identically, but a dimmed one stops registering
+ * partway down and its region comes back short — 35 and 32 pixels against its
+ * neighbours' 45 in one observed hand. The rank is read from a box measured as
+ * a fraction of the card, so a short region puts that box in the wrong place
+ * and crops the glyph: the ten in that hand came back unread.
+ *
+ * The row's median is the honest size, since clipping only ever takes pixels
+ * away. Only the extent is corrected, never the position of the top-left
+ * corner, which is where the rank is and is the part that always registers.
+ */
+function squareUpRow(row: CardRegion[]): CardRegion[] {
+  if (row.length < 2) return row;
+  const height = median(row.map(c => c.height));
+  return row.map(card => (card.height === height ? card : { ...card, height }));
 }
 
 /**
@@ -749,6 +777,9 @@ const HERO_MIN_CORRELATION = 0.8;
  * width, every row of cards lying on the felt at 0.46 or beyond.
  */
 const PANEL_MAX_ORIGIN = 0.25;
+
+/** Cards in an Omaha hand, and so the most a panel row can hold. */
+const CARDS_IN_HAND = 4;
 
 /**
  * Narrow a set of rows to the ones actually drawn in the hands panel.
