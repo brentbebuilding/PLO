@@ -8,16 +8,23 @@ import { PlayingCard } from './PlayingCard';
  * are placed around the oval the way a real table seats them.
  */
 export const SEAT_POSITIONS = [
-  { top: '2%', left: '50%', transform: 'translateX(-50%)' },   // hero, top centre
-  { top: '24%', left: '84%', transform: 'translateX(-50%)' },  // upper right
-  { top: '58%', left: '84%', transform: 'translateX(-50%)' },  // lower right
-  { top: '78%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
-  { top: '58%', left: '16%', transform: 'translateX(-50%)' },  // lower left
-  { top: '24%', left: '16%', transform: 'translateX(-50%)' },  // upper left
+  { top: '1%', left: '50%', transform: 'translateX(-50%)' },   // hero, top centre
+  { top: '21%', left: '82%', transform: 'translateX(-50%)' },  // upper right
+  { top: '59%', left: '82%', transform: 'translateX(-50%)' },  // lower right
+  { top: '79%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
+  { top: '59%', left: '18%', transform: 'translateX(-50%)' },  // lower left
+  { top: '21%', left: '18%', transform: 'translateX(-50%)' },  // upper left
 ];
 
-/** Seats low on the felt get their readout above the cards, not below. */
-const READOUT_ABOVE = [false, false, false, true, true, false];
+/**
+ * Which side of the cards each seat's readout sits on.
+ *
+ * Every seat points its readout away from the middle of the felt. The two
+ * seats down each side would otherwise put one readout below the upper hand
+ * and another above the lower hand, walking them straight into each other on
+ * a short window.
+ */
+const READOUT_ABOVE = [false, true, false, true, false, true];
 
 export const SEAT_COUNT = SEAT_POSITIONS.length;
 export const CARDS_PER_SEAT = 4;
@@ -36,9 +43,16 @@ export function sameSlot(a: SlotRef | null, b: SlotRef): boolean {
 interface CardSlotProps {
   card: Card | null;
   selected: boolean;
-  size?: 'normal' | 'small';
+  /** 'normal' is the board, 'small' a seat, 'dead' the row along the bottom. */
+  size?: 'normal' | 'small' | 'dead';
   onClick: () => void;
 }
+
+const SLOT_WIDTH = {
+  normal: 'var(--board-card-w)',
+  small: 'var(--seat-card-w)',
+  dead: 'var(--dead-card-w)',
+};
 
 /**
  * One card position.
@@ -48,7 +62,7 @@ interface CardSlotProps {
  * slots show a face-down back, as on a real table.
  */
 export const CardSlot: React.FC<CardSlotProps> = ({ card, selected, size = 'normal', onClick }) => {
-  const w = size === 'small' ? 'var(--seat-card-w)' : 'var(--board-card-w)';
+  const w = SLOT_WIDTH[size];
   return (
     <button
       onClick={onClick}
@@ -97,10 +111,12 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   <div
     className="relative mx-auto"
     style={{
-      // Fit whichever dimension runs out first, so a short window doesn't
-      // push the dead cards off the bottom.
-      aspectRatio: '16 / 10',
-      width: 'min(100%, calc(var(--table-h) * 1.6))',
+      // A wide oval, both because a real table is one and because the seats
+      // are what constrain card size: they have to clear the board without
+      // running off the felt. Height is the scarce dimension in a browser
+      // window, so buying that clearance sideways is nearly free.
+      aspectRatio: '21 / 10',
+      width: 'min(100%, calc(var(--table-h) * 2.1))',
       maxHeight: '100%',
     }}
   >
@@ -137,8 +153,12 @@ export const PokerTable: React.FC<PokerTableProps> = ({
         ))}
         {seatIndex === 0 && (
           <span
-            style={{ fontSize: 'calc(var(--seat-card-w) * 0.34)' }}
-            className="absolute -top-4 left-1/2 -translate-x-1/2 font-medium text-emerald-300 whitespace-nowrap"
+            style={{
+              fontSize: 'calc(var(--seat-card-w) * 0.3)',
+              // Clear of the cards by its own height, whatever that scales to.
+              bottom: 'calc(100% + var(--seat-card-w) * 0.08)',
+            }}
+            className="absolute left-1/2 -translate-x-1/2 font-medium text-emerald-300 whitespace-nowrap"
           >
             You
           </span>

@@ -245,8 +245,11 @@ function App() {
           // Card sizes track whichever of width or height is tighter, so the
           // table, deck and dead cards all stay inside one viewport.
           '--rail-card-w': 'clamp(17px, min(1.9vw, 3.1vh), 30px)',
-          '--seat-card-w': 'clamp(19px, min(2.3vw, 3.6vh), 36px)',
-          '--board-card-w': 'clamp(22px, min(2.8vw, 4.4vh), 44px)',
+          '--seat-card-w': 'clamp(30px, min(4.0vw, 6.4vh), 64px)',
+          '--board-card-w': 'clamp(34px, min(4.8vw, 7.6vh), 78px)',
+          // The dead row is reference, not the thing being read, so it keeps
+          // its own size rather than growing with the table.
+          '--dead-card-w': 'clamp(16px, min(1.8vw, 2.9vh), 28px)',
         } as React.CSSProperties
       }
     >
@@ -350,12 +353,12 @@ function App() {
 
           <div className="shrink-0">
             <h2 className="text-xs font-semibold mb-1">Dead Cards</h2>
-            <div className="flex flex-wrap" style={{ gap: 'calc(var(--seat-card-w) * 0.1)' }}>
+            <div className="flex flex-wrap" style={{ gap: 'calc(var(--dead-card-w) * 0.14)' }}>
               {dead.map((card, i) => (
                 <CardSlot
                   key={i}
                   card={card}
-                  size="small"
+                  size="dead"
                   selected={sameSlot(selected, { group: 'dead', index: i })}
                   onClick={() => selectSlot({ group: 'dead', index: i })}
                 />
@@ -366,7 +369,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 7.0
+        Runs entirely in your browser · nothing is uploaded · VERSION 7.1
       </footer>
     </div>
   );
