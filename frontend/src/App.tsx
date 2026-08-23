@@ -13,7 +13,6 @@ import PokerTable, {
   SlotRef,
   sameSlot,
 } from './components/PokerTable';
-import SeatStack from './components/SeatStack';
 import useIsNarrow from './hooks/useIsNarrow';
 import { Github, Loader2, RefreshCw, Upload } from 'lucide-react';
 
@@ -246,22 +245,19 @@ function App() {
 
   return (
     <div
-      className={`flex flex-col bg-neutral-950 text-white ${
-        // Wide screens fit everything in one viewport and must not scroll, or
-        // the table drifts out of view. A phone cannot, so it scrolls.
-        isNarrow ? 'min-h-screen' : 'h-screen overflow-hidden'
-      }`}
+      className="h-screen flex flex-col bg-neutral-950 text-white overflow-hidden"
       style={
         (isNarrow
           ? {
-              // Solved from what has to fit across, not guessed as a share of
-              // the width: the board is five cards plus four gaps of a tenth
-              // of a card, so 5.5 card widths, and the deck rail is thirteen
-              // with a pixel between. The page runs on downwards, so height
-              // never enters into it.
+              // Solved from what has to fit across rather than guessed as a
+              // share of the width. The binding constraint is the gap between
+              // a side seat and the board: half a stacked hand plus half the
+              // board has to fit inside it, which works out at a board card
+              // per 10.6 of the felt's width. The deck rail is thirteen cards
+              // with a pixel between.
               '--rail-card-w': 'clamp(15px, calc((100vw - 48px) / 13), 30px)',
-              '--seat-card-w': 'clamp(28px, calc((100vw - 44px) / 5.5), 68px)',
-              '--board-card-w': 'clamp(28px, calc((100vw - 44px) / 5.5), 72px)',
+              '--seat-card-w': 'clamp(20px, calc((100vw - 24px) / 12.5), 39px)',
+              '--board-card-w': 'clamp(24px, calc((100vw - 24px) / 10.6), 46px)',
               '--dead-card-w': 'clamp(16px, 5.5vw, 28px)',
             }
           : {
@@ -291,8 +287,8 @@ function App() {
         </div>
       </header>
 
-      <main className={`bg-[#4a1414] px-3 py-2 flex flex-col ${isNarrow ? '' : 'flex-1 min-h-0'}`}>
-        <div className={`max-w-6xl w-full mx-auto flex flex-col gap-2 ${isNarrow ? '' : 'flex-1 min-h-0'}`}>
+      <main className="bg-[#4a1414] px-3 py-2 flex-1 min-h-0 flex flex-col">
+        <div className="max-w-6xl w-full mx-auto flex-1 min-h-0 flex flex-col gap-2">
           {/* Deck and screenshot controls */}
           <div className="flex flex-wrap gap-3 items-start justify-between shrink-0">
             <CardRail used={usedCards} onPick={placeCard} disabled={!selected} />
@@ -360,29 +356,20 @@ function App() {
             </div>
           </div>
 
-          {isNarrow ? (
-            <SeatStack
+          <div
+            ref={tableAreaRef}
+            className="flex-1 min-h-0 flex items-center justify-center"
+            style={{ '--table-h': `${tableHeight}px` } as React.CSSProperties}
+          >
+            <PokerTable
               seats={seats}
               board={board}
               selected={selected}
               onSelect={selectSlot}
               equity={seatEquity}
+              compact={isNarrow}
             />
-          ) : (
-            <div
-              ref={tableAreaRef}
-              className="flex-1 min-h-0 flex items-center justify-center"
-              style={{ '--table-h': `${tableHeight}px` } as React.CSSProperties}
-            >
-              <PokerTable
-                seats={seats}
-                board={board}
-                selected={selected}
-                onSelect={selectSlot}
-                equity={seatEquity}
-              />
-            </div>
-          )}
+          </div>
 
           <div className="shrink-0">
             <h2 className="text-xs font-semibold mb-1">Dead Cards</h2>
@@ -402,7 +389,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 7.6
+        Runs entirely in your browser · nothing is uploaded · VERSION 7.7
       </footer>
     </div>
   );
