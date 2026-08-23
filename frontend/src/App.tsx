@@ -13,6 +13,8 @@ import PokerTable, {
   SlotRef,
   sameSlot,
 } from './components/PokerTable';
+import SeatStack from './components/SeatStack';
+import useIsNarrow from './hooks/useIsNarrow';
 import { Github, Loader2, RefreshCw, Upload } from 'lucide-react';
 
 const DEAD_CARD_SLOTS = 14;
@@ -43,6 +45,7 @@ function App() {
 
   const tableAreaRef = useRef<HTMLDivElement>(null);
   const [tableHeight, setTableHeight] = useState(400);
+  const isNarrow = useIsNarrow();
 
   const [selected, setSelected] = useState<SlotRef | null>({ group: 0, index: 0 });
   const [equity, setEquity] = useState<
@@ -221,7 +224,10 @@ function App() {
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+    // Re-runs when the layout switches: the element the observer needs only
+    // exists in the wide layout, so rotating a phone into landscape has to
+    // attach it rather than leave the table sized from a stale measurement.
+  }, [isNarrow]);
 
   // Paste anywhere on the page drops a screenshot in.
   useEffect(() => {
@@ -240,18 +246,34 @@ function App() {
 
   return (
     <div
-      className="h-screen flex flex-col bg-neutral-950 text-white overflow-hidden"
+      className={`flex flex-col bg-neutral-950 text-white ${
+        // Wide screens fit everything in one viewport and must not scroll, or
+        // the table drifts out of view. A phone cannot, so it scrolls.
+        isNarrow ? 'min-h-screen' : 'h-screen overflow-hidden'
+      }`}
       style={
-        {
-          // Card sizes track whichever of width or height is tighter, so the
-          // table, deck and dead cards all stay inside one viewport.
-          '--rail-card-w': 'clamp(17px, min(1.9vw, 3.1vh), 30px)',
-          '--seat-card-w': 'clamp(30px, min(4.0vw, 6.4vh), 64px)',
-          '--board-card-w': 'clamp(34px, min(4.8vw, 7.6vh), 78px)',
-          // The dead row is reference, not the thing being read, so it keeps
-          // its own size rather than growing with the table.
-          '--dead-card-w': 'clamp(16px, min(1.8vw, 2.9vh), 28px)',
-        } as React.CSSProperties
+        (isNarrow
+          ? {
+              // Solved from what has to fit across, not guessed as a share of
+              // the width: the board is five cards plus four gaps of a tenth
+              // of a card, so 5.5 card widths, and the deck rail is thirteen
+              // with a pixel between. The page runs on downwards, so height
+              // never enters into it.
+              '--rail-card-w': 'clamp(15px, calc((100vw - 48px) / 13), 30px)',
+              '--seat-card-w': 'clamp(28px, calc((100vw - 44px) / 5.5), 68px)',
+              '--board-card-w': 'clamp(28px, calc((100vw - 44px) / 5.5), 72px)',
+              '--dead-card-w': 'clamp(16px, 5.5vw, 28px)',
+            }
+          : {
+              // Card sizes track whichever of width or height is tighter, so
+              // the table, deck and dead cards all stay inside one viewport.
+              '--rail-card-w': 'clamp(17px, min(1.9vw, 3.1vh), 30px)',
+              '--seat-card-w': 'clamp(30px, min(4.0vw, 6.4vh), 64px)',
+              '--board-card-w': 'clamp(34px, min(4.8vw, 7.6vh), 78px)',
+              // The dead row is reference, not the thing being read, so it
+              // keeps its own size rather than growing with the table.
+              '--dead-card-w': 'clamp(16px, min(1.8vw, 2.9vh), 28px)',
+            }) as React.CSSProperties
       }
     >
       <header className="px-4 py-2 flex items-center justify-between border-b border-neutral-800 shrink-0">
@@ -269,8 +291,8 @@ function App() {
         </div>
       </header>
 
-      <main className="bg-[#4a1414] px-3 py-2 flex-1 min-h-0 flex flex-col">
-        <div className="max-w-6xl w-full mx-auto flex-1 min-h-0 flex flex-col gap-2">
+      <main className={`bg-[#4a1414] px-3 py-2 flex flex-col ${isNarrow ? '' : 'flex-1 min-h-0'}`}>
+        <div className={`max-w-6xl w-full mx-auto flex flex-col gap-2 ${isNarrow ? '' : 'flex-1 min-h-0'}`}>
           {/* Deck and screenshot controls */}
           <div className="flex flex-wrap gap-3 items-start justify-between shrink-0">
             <CardRail used={usedCards} onPick={placeCard} disabled={!selected} />
@@ -338,19 +360,29 @@ function App() {
             </div>
           </div>
 
-          <div
-            ref={tableAreaRef}
-            className="flex-1 min-h-0 flex items-center justify-center"
-            style={{ '--table-h': `${tableHeight}px` } as React.CSSProperties}
-          >
-            <PokerTable
+          {isNarrow ? (
+            <SeatStack
               seats={seats}
               board={board}
               selected={selected}
               onSelect={selectSlot}
               equity={seatEquity}
             />
-          </div>
+          ) : (
+            <div
+              ref={tableAreaRef}
+              className="flex-1 min-h-0 flex items-center justify-center"
+              style={{ '--table-h': `${tableHeight}px` } as React.CSSProperties}
+            >
+              <PokerTable
+                seats={seats}
+                board={board}
+                selected={selected}
+                onSelect={selectSlot}
+                equity={seatEquity}
+              />
+            </div>
+          )}
 
           <div className="shrink-0">
             <h2 className="text-xs font-semibold mb-1">Dead Cards</h2>
@@ -370,7 +402,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 7.5
+        Runs entirely in your browser · nothing is uploaded · VERSION 7.6
       </footer>
     </div>
   );
