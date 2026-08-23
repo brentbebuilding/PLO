@@ -24,10 +24,13 @@ export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled }) =>
 
   return (
     <div className="bg-black/30 rounded-lg p-1.5 inline-block">
-      {/* Two suits per row while there is room; they wrap to their own rows
-          when there isn't, rather than forcing the page wider. */}
+      {/* Two suits per row. On a phone they wrap to one suit each; out wide
+          they stay put and the cards shrink, so the deck keeps its shape. */}
       {[0, 1].map(pairIndex => (
-        <div key={pairIndex} className="flex flex-wrap gap-1.5 mb-1 last:mb-0">
+        <div
+          key={pairIndex}
+          className="flex flex-wrap sm:flex-nowrap gap-1.5 mb-1 last:mb-0"
+        >
           {RAIL_SUITS.slice(pairIndex * 2, pairIndex * 2 + 2).map(suit => (
             <div key={suit} className="flex gap-px">
               {RAIL_RANKS.map(rank => {

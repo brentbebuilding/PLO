@@ -229,19 +229,9 @@ function App() {
 
   return (
     <div
-      className={`h-screen flex flex-col bg-neutral-950 text-white ${
-        // Out wide the layout holds its shape rather than rearranging itself
-        // as the window narrows: past the point where the deck would fold from
-        // two rows to four and the dropzone would drop below it, the page just
-        // runs off the edge and scrolls. Things staying where they are is
-        // worth more than everything being on screen. The phone layout is
-        // different and reflows as it should.
-        isNarrow ? 'overflow-hidden' : 'overflow-x-auto overflow-y-hidden'
-      }`}
+      className="h-screen flex flex-col bg-neutral-950 text-white overflow-hidden"
       style={
-        ({
-          minWidth: isNarrow ? undefined : '1060px',
-          ...(isNarrow
+        (isNarrow
           ? {
               // Solved from what has to fit across rather than guessed. The
               // binding constraint is that a side hand must not reach the
@@ -261,7 +251,7 @@ function App() {
           : {
               // Card sizes track whichever of width or height is tighter, so
               // the table, deck and dead cards all stay inside one viewport.
-              '--rail-card-w': 'clamp(17px, min(1.9vw, 3.1vh), 30px)',
+              '--rail-card-w': 'clamp(14px, min(1.9vw, 3.1vh), 30px)',
               '--rail-card-h': 'calc(var(--rail-card-w) * 1.4)',
               // Hands are drawn at the same size as the board. The cap comes
               // from the one thing that has to hold: a side hand reaches 2.2
@@ -282,8 +272,7 @@ function App() {
               // The dead row is reference, not the thing being read, so it
               // keeps its own size rather than growing with the table.
               '--dead-card-w': 'clamp(16px, min(1.8vw, 2.9vh), 28px)',
-            }),
-        }) as React.CSSProperties
+            }) as React.CSSProperties
       }
     >
       <header className="px-4 py-2 flex items-center justify-between border-b border-neutral-800 shrink-0">
@@ -304,12 +293,15 @@ function App() {
       <main className="bg-[#4a1414] px-3 py-2 flex-1 min-h-0 flex flex-col">
         <div className="max-w-6xl w-full mx-auto flex-1 min-h-0 flex flex-col gap-2">
           {/* Deck and screenshot controls */}
-          <div className="flex flex-wrap gap-3 items-start justify-between shrink-0">
+          {/* No wrapping out wide. Letting these fold put the dropzone
+              underneath the deck, which is the rearranging that made things
+              move; they shrink instead, and everything stays where it was. */}
+          <div className="flex flex-wrap sm:flex-nowrap gap-3 items-start justify-between shrink-0">
             <CardRail used={usedCards} onPick={placeCard} disabled={!selected} />
 
             <div
               className={`flex flex-col gap-1.5 ${
-                isNarrow ? 'w-full' : 'min-w-[180px] flex-1 max-w-[240px]'
+                isNarrow ? 'w-full' : 'min-w-[150px] flex-1 max-w-[240px]'
               }`}
             >
               {/* Side by side on a phone. Stacked they cost 60px of height
@@ -421,7 +413,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 8.4
+        Runs entirely in your browser · nothing is uploaded · VERSION 8.5
       </footer>
     </div>
   );
