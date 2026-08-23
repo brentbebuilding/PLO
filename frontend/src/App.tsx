@@ -308,7 +308,8 @@ function App() {
                   if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]);
                 }}
                 onClick={() => document.getElementById('shot-input')?.click()}
-                className={`border-2 border-dashed border-neutral-500 hover:border-neutral-300 rounded-lg p-2 text-center cursor-pointer bg-black/20 transition-colors ${
+                style={{ height: isNarrow ? '3.5rem' : '4.75rem' }}
+                className={`border-2 border-dashed border-neutral-500 hover:border-neutral-300 rounded-lg p-2 text-center cursor-pointer bg-black/20 transition-colors flex flex-col items-center justify-center overflow-hidden ${
                   isNarrow ? 'flex-1 min-w-0' : ''
                 }`}
               >
@@ -350,21 +351,30 @@ function App() {
               </button>
               </div>
 
-              {readNote && !error && (
-                <div className="text-[11px] text-neutral-400">{readNote}</div>
-              )}
-              {error && (
-                <div className="text-[11px] text-red-300 bg-red-950/50 rounded px-2 py-1">
-                  {error}
-                </div>
-              )}
+              {/* Kept at a fixed height whether or not there is anything to
+                  say. The table is sized from the height left over below this
+                  column, so a line appearing here used to shrink the felt and
+                  move every seat on it. */}
+              <div
+                className="flex flex-col gap-1 overflow-hidden"
+                style={{ height: isNarrow ? '2.25rem' : '2.75rem' }}
+              >
+                {readNote && !error && (
+                  <div className="text-[11px] text-neutral-400">{readNote}</div>
+                )}
+                {error && (
+                  <div className="text-[11px] text-red-300 bg-red-950/50 rounded px-2 py-1">
+                    {error}
+                  </div>
+                )}
 
-              {equity && (
-                <div className="text-[11px] text-neutral-400">
-                  exact · {equity.boards.toLocaleString()}{' '}
-                  {equity.boards === 1 ? 'board' : 'boards'} · {stage}
-                </div>
-              )}
+                {equity && (
+                  <div className="text-[11px] text-neutral-400">
+                    exact · {equity.boards.toLocaleString()}{' '}
+                    {equity.boards === 1 ? 'board' : 'boards'} · {stage}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -401,7 +411,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 8.1
+        Runs entirely in your browser · nothing is uploaded · VERSION 8.2
       </footer>
     </div>
   );
