@@ -258,7 +258,15 @@ function App() {
           : {
               // Card sizes track whichever of width or height is tighter, so
               // the table, deck and dead cards all stay inside one viewport.
-              '--rail-card-w': 'clamp(14px, min(1.9vw, 3.1vh), 30px)',
+              // The deck stays at full size until it would run into the
+              // dropzone beside it, and only then gives ground. What is left
+              // for it is the content width — the page less its padding, and
+              // no wider than the column caps it — less the 240px the dropzone
+              // takes and the 12px between them, less 42px of the deck's own
+              // padding and the gaps between its cards. Twenty-six cards share
+              // what remains. Full size holds down to about a 1100px window.
+              '--rail-card-w':
+                'clamp(14px, calc((min(100vw - 24px, 1152px) - 294px) / 26), 30px)',
               '--rail-card-h': 'calc(var(--rail-card-w) * 1.4)',
               // Hands are drawn at the same size as the board. The cap comes
               // from the one thing that has to hold: a side hand reaches 2.2
@@ -309,7 +317,12 @@ function App() {
               isNarrow ? 'flex-wrap' : 'flex-nowrap'
             }`}
           >
-            <CardRail used={usedCards} onPick={placeCard} disabled={!selected} compact={isNarrow} />
+            <CardRail
+              used={usedCards}
+              onPick={placeCard}
+              disabled={!selected}
+              compact={isNarrow}
+            />
 
             <div
               className={`flex flex-col gap-1.5 ${
@@ -425,7 +438,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 8.6
+        Runs entirely in your browser · nothing is uploaded · VERSION 8.7
       </footer>
     </div>
   );
