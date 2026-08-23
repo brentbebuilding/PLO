@@ -249,15 +249,13 @@ function App() {
       style={
         (isNarrow
           ? {
-              // Solved from what has to fit across rather than guessed as a
-              // share of the width. The binding constraint is the gap between
-              // a side seat and the board: half a stacked hand plus half the
-              // board has to fit inside it, which works out at a board card
-              // per 10.6 of the felt's width. The deck rail is thirteen cards
-              // with a pixel between.
+              // Solved from what has to fit across rather than guessed. The
+              // binding constraint is that a side hand must not reach the
+              // hero's, which caps a seat card at 0.072 of the felt's width.
+              // The deck rail is thirteen cards with a pixel between.
               '--rail-card-w': 'clamp(15px, calc((100vw - 48px) / 13), 30px)',
-              '--seat-card-w': 'clamp(20px, calc((100vw - 24px) / 12.5), 39px)',
-              '--board-card-w': 'clamp(24px, calc((100vw - 24px) / 10.6), 46px)',
+              '--seat-card-w': 'clamp(20px, calc((100vw - 24px) * 0.072), 34px)',
+              '--board-card-w': 'clamp(24px, calc((100vw - 24px) * 0.083), 40px)',
               '--dead-card-w': 'clamp(16px, 5.5vw, 28px)',
             }
           : {
@@ -389,7 +387,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 7.7
+        Runs entirely in your browser · nothing is uploaded · VERSION 7.8
       </footer>
     </div>
   );

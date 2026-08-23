@@ -17,21 +17,22 @@ export const SEAT_POSITIONS = [
 ];
 
 /**
- * The same ring on a phone, where a hand is stacked two by two.
+ * The same ring on a phone, spread down rather than across.
  *
- * A hand laid out in a line is four cards wide, and at phone width there is
- * not enough felt between a side seat and the board to hold that — the two
- * ran into each other. Folding the hand into a square halves how far it
- * reaches towards the middle, which buys the clearance without shrinking the
- * cards to the point of being hard to read or to tap.
+ * A hand is four cards wide and a phone is not, so a side seat and the board
+ * cannot be kept apart sideways — at 390px there is simply not enough felt
+ * between them. They are kept apart vertically instead: the felt is close to
+ * square rather than a long oval, which gives each row of the ring a band of
+ * its own. A side hand may then reach across the board's column, but never
+ * across the board itself, so nothing is covered.
  */
 const COMPACT_SEAT_POSITIONS = [
   { top: '0%', left: '50%', transform: 'translateX(-50%)' },   // hero, top centre
-  { top: '12%', left: '84%', transform: 'translateX(-50%)' },  // upper right
-  { top: '50%', left: '84%', transform: 'translateX(-50%)' },  // lower right
-  { top: '62%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
-  { top: '50%', left: '16%', transform: 'translateX(-50%)' },  // lower left
-  { top: '12%', left: '16%', transform: 'translateX(-50%)' },  // upper left
+  { top: '21%', left: '82%', transform: 'translateX(-50%)' },  // upper right
+  { top: '58%', left: '82%', transform: 'translateX(-50%)' },  // lower right
+  { top: '79%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
+  { top: '58%', left: '18%', transform: 'translateX(-50%)' },  // lower left
+  { top: '21%', left: '18%', transform: 'translateX(-50%)' },  // upper left
 ];
 
 /*
@@ -119,7 +120,7 @@ interface PokerTableProps {
   onSelect: (slot: SlotRef) => void;
   /** Indexed by seat; absent entries simply show nothing. */
   equity?: (SeatEquity | null)[];
-  /** Phone layout: a rounder felt, seats pushed out, hands stacked two by two. */
+  /** Phone layout: a near-square felt with the ring spread down it. */
   compact?: boolean;
 }
 
@@ -134,15 +135,15 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   <div
     className="relative mx-auto"
     style={{
-      // A wide oval, both because a real table is one and because the seats
-      // are what constrain card size: they have to clear the board without
-      // running off the felt. Height is the scarce dimension in a browser
-      // window, so buying that clearance sideways is nearly free.
-      // A phone has width to spare only downwards, so the felt is rounder
-      // there and the seats sit further apart around it.
-      aspectRatio: compact ? '13 / 10' : '21 / 10',
+      // Out wide, a long oval: the seats are what constrain card size, they
+      // have to clear the board without running off the felt, and height is
+      // the scarce dimension in a browser window so buying that clearance
+      // sideways is nearly free. On a phone the opposite holds — there is no
+      // width to spare and the page can run on downwards — so the felt is
+      // nearly square and the ring spreads down instead.
+      aspectRatio: compact ? '23 / 20' : '21 / 10',
       width: compact
-        ? 'min(100%, calc(var(--table-h) * 1.3))'
+        ? 'min(100%, calc(var(--table-h) * 1.15))'
         : 'min(100%, calc(var(--table-h) * 2.1))',
       maxHeight: '100%',
     }}
@@ -150,13 +151,13 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     {/* Felt. Deliberately unbranded. */}
     <div
       className={`absolute rounded-[50%] bg-gradient-to-b from-emerald-800 to-emerald-900 border-[max(6px,0.9vmin)] border-neutral-900 shadow-2xl ${
-        // Less rail on a phone, so the stacked hands sit on green.
-        compact ? 'inset-[4%]' : 'inset-[8%]'
+        // Less rail on a phone, where the hands reach further out.
+        compact ? 'inset-[2%]' : 'inset-[8%]'
       }`}
     />
     <div
       className={`absolute rounded-[50%] border border-emerald-700/40 ${
-        compact ? 'inset-[6%]' : 'inset-[10%]'
+        compact ? 'inset-[4%]' : 'inset-[10%]'
       }`}
     />
 
@@ -175,17 +176,10 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     {seats.map((hand, seatIndex) => (
       <div
         key={seatIndex}
-        className={`absolute flex ${
-          // Wrapping is only wanted on a phone. Out wide, a seat sitting at
-          // 82% has barely any room to its right, and an auto-width flex box
-          // takes that as the line length and folds a four-card hand in half.
-          compact ? 'flex-wrap justify-center' : ''
-        }`}
+        className="absolute flex"
         style={{
           ...(compact ? COMPACT_SEAT_POSITIONS : SEAT_POSITIONS)[seatIndex],
           gap: 'calc(var(--seat-card-w) * 0.1)',
-          // Exactly two cards wide, so a four-card hand folds into a square.
-          width: compact ? 'calc(var(--seat-card-w) * 2.1)' : undefined,
         }}
       >
         {hand.map((card, cardIndex) => (
