@@ -345,6 +345,16 @@ export function findBoard(
  * Returned largest-row-first. Which row belongs to whom isn't knowable from
  * pixels alone, so callers should treat the assignment as a suggestion.
  */
+/**
+ * A row's card height, taken as the median.
+ *
+ * One clipped region shouldn't speak for the row: colour regions routinely come
+ * up a few pixels short where a card meets the panel background.
+ */
+function rowHeight(row: CardRegion[]): number {
+  return median(row.map(c => c.height));
+}
+
 export function findHandRows(
   regions: CardRegion[],
   board: BoardAnchor,
@@ -388,13 +398,32 @@ export function findHandRows(
   // The panel is recognisable as rows sharing an x origin and card size, so
   // when two or more such rows exist they are the authoritative list and the
   // seat copies are dropped.
-  const key = (row: CardRegion[]) =>
-    `${Math.round(row[0].x / 8)}:${Math.round(row[0].height / 4)}`;
-  const counts = new Map<string, number>();
-  for (const row of usable) counts.set(key(row), (counts.get(key(row)) ?? 0) + 1);
+  // Grouped by left edge alone. Card size is checked afterwards, with a
+  // tolerance, rather than folded into the key: a card's colour region is
+  // routinely clipped a few pixels short, and one observed panel row whose
+  // first card registered 34px instead of 40 landed in a different bucket from
+  // its neighbours and was thrown away whole — a revealed hand lost, and the
+  // user's own hand at that.
+  const origin = (row: CardRegion[]) => Math.round(row[0].x / 8);
+  const columns = new Map<number, CardRegion[][]>();
+  for (const row of usable) {
+    const at = origin(row);
+    columns.set(at, [...(columns.get(at) ?? []), row]);
+  }
 
-  const panelKey = [...counts.entries()].find(([, n]) => n >= 2)?.[0];
-  const chosen = panelKey ? usable.filter(row => key(row) === panelKey) : usable;
+  let panel: CardRegion[][] | null = null;
+  for (const group of columns.values()) {
+    if (group.length >= 2 && (!panel || group.length > panel.length)) panel = group;
+  }
+
+  let chosen = usable;
+  if (panel) {
+    // Rows in the column that are a different size are seat copies, not panel
+    // entries, so they still get dropped — just on the row's typical card
+    // height rather than on whichever card happened to come first.
+    const typical = median(panel.map(rowHeight));
+    chosen = panel.filter(row => Math.abs(rowHeight(row) - typical) <= typical * 0.3);
+  }
 
   const filled = image ? chosen.map(row => fillRowGaps(row, image)) : chosen;
   return filled.sort((a, b) => a[0].y - b[0].y);
@@ -786,33 +815,30 @@ export function findHeroRow(
   if (candidates.length === 0) return null;
 
   const integral = buildIntegral(image);
-  const panels = candidates.map(i => {
-    const box = panelAvatarBox(rows[i]);
-    return avatarSignature(integral, box.x, box.y, box.w, box.h);
-  });
-
-  // Anchored on a panel row, not just the first row of any kind: a stray pair
-  // of cards on the felt has its own card height, and starting the scale sweep
-  // from that overshoots or undershoots the real avatar everywhere.
-  const base = panelAvatarBox(rows[candidates[0]]);
   const centreX = image.width / 2;
-
-  let best: HeroMatch | null = null;
   const step = Math.max(4, Math.round(image.height / 200));
 
-  // The table avatar is drawn larger than the panel thumbnail, and by how much
-  // depends on the window size, so scale is searched rather than assumed.
-  for (let scale = 1.0; scale <= 2.2; scale += 0.15) {
-    const w = base.w * scale;
-    const h = base.h * scale;
-    for (let y = image.height * 0.52; y < image.height * 0.78 - h; y += step) {
-      for (let dx = -w * 0.9; dx <= w * 0.9; dx += step) {
-        const probe = avatarSignature(integral, centreX + dx - w / 2, y, w, h);
-        for (let i = 0; i < panels.length; i++) {
-          const c = correlate(probe, panels[i]);
-          if (!best || c > best.correlation) {
-            best = { row: candidates[i], correlation: c };
-          }
+  let best: HeroMatch | null = null;
+
+  // Each row is swept at its own size rather than all of them sharing the first
+  // row's. Panel rows are drawn identically, but their measured card heights
+  // are not: dim cards register short, and one panel held rows measuring 41px
+  // and 29px. Probes cut to the first row's size then framed the second row's
+  // avatar wrongly everywhere, and it failed to match its own seat.
+  for (const i of candidates) {
+    const box = panelAvatarBox(rows[i]);
+    const panel = avatarSignature(integral, box.x, box.y, box.w, box.h);
+
+    // The table avatar is drawn larger than the panel thumbnail, and by how
+    // much depends on the window size, so scale is searched rather than assumed.
+    for (let scale = 1.0; scale <= 2.2; scale += 0.15) {
+      const w = box.w * scale;
+      const h = box.h * scale;
+      for (let y = image.height * 0.52; y < image.height * 0.78 - h; y += step) {
+        for (let dx = -w * 0.9; dx <= w * 0.9; dx += step) {
+          const probe = avatarSignature(integral, centreX + dx - w / 2, y, w, h);
+          const c = correlate(probe, panel);
+          if (!best || c > best.correlation) best = { row: i, correlation: c };
         }
       }
     }
