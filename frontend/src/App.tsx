@@ -401,7 +401,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 8.0
+        Runs entirely in your browser · nothing is uploaded · VERSION 8.1
       </footer>
     </div>
   );
@@ -440,8 +440,11 @@ function advance(slot: SlotRef): SlotRef {
   if (slot.index + 1 < CARDS_PER_SEAT) {
     return { group: slot.group, index: slot.index + 1 };
   }
-  // End of a hand: move to the board after the user's own, else the next seat.
-  if (slot.group === 0) return { group: 'board', index: 0 };
+  // End of a hand. Typing a spot in goes: your hand, the opponent you are up
+  // against, then the board — so the user's seat runs on to the one on their
+  // right rather than skipping ahead to the community cards.
+  if (slot.group === 0) return { group: 1, index: 0 };
+  if (slot.group === 1) return { group: 'board', index: 0 };
   return { group: Math.min(slot.group + 1, SEAT_COUNT - 1), index: 0 };
 }
 
