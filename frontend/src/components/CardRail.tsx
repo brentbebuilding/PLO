@@ -16,9 +16,11 @@ interface CardRailProps {
   /** Null when nothing is selected, in which case the rail is inert. */
   onPick: (card: Card) => void;
   disabled?: boolean;
+  /** Phone layout: one suit per row instead of two. */
+  compact?: boolean;
 }
 
-export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled }) => {
+export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled, compact }) => {
   const isUsed = (rank: Rank, suit: Suit) =>
     used.some(c => c.rank === rank && c.suit === suit);
 
@@ -29,7 +31,9 @@ export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled }) =>
       {[0, 1].map(pairIndex => (
         <div
           key={pairIndex}
-          className="flex flex-wrap sm:flex-nowrap gap-1.5 mb-1 last:mb-0"
+          className={`flex gap-1.5 mb-1 last:mb-0 ${
+            compact ? 'flex-wrap' : 'flex-nowrap'
+          }`}
         >
           {RAIL_SUITS.slice(pairIndex * 2, pairIndex * 2 + 2).map(suit => (
             <div key={suit} className="flex gap-px">
