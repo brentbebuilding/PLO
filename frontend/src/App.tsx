@@ -88,7 +88,8 @@ function App() {
       try {
         const result: SimulationResult = calculateEquity(
           complete,
-          board.filter((c): c is Card => c !== null)
+          board.filter((c): c is Card => c !== null),
+          dead.filter((c): c is Card => c !== null)
         );
         // Map back to seat numbers so the labels match the table.
         const seatOf = seats
@@ -111,7 +112,7 @@ function App() {
       }
     }, 10);
     return () => clearTimeout(timer);
-  }, [seats, board]);
+  }, [seats, board, dead]);
 
   /** Place a card into the selected slot, then step to the next one. */
   const placeCard = (card: Card) => {
@@ -369,7 +370,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 7.1
+        Runs entirely in your browser · nothing is uploaded · VERSION 7.2
       </footer>
     </div>
   );

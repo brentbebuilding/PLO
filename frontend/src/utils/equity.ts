@@ -210,7 +210,16 @@ function tripleTables(poolSize: number) {
   return { c2, c3, size: (poolSize * (poolSize - 1) * (poolSize - 2)) / 6 };
 }
 
-export function calculateEquity(playerHands: Card[][], board: Card[]): SimulationResult {
+/**
+ * @param dead Cards known to be out of the deck without being in anyone's
+ *   hand or on the board — folded, exposed, or otherwise accounted for. They
+ *   are removed from the run-outs, which is what makes them change the answer.
+ */
+export function calculateEquity(
+  playerHands: Card[][],
+  board: Card[],
+  dead: Card[] = []
+): SimulationResult {
   if (playerHands.length < 2) throw new Error('Need at least 2 players');
   for (let i = 0; i < playerHands.length; i++) {
     if (playerHands[i].length !== 4) {
@@ -231,6 +240,13 @@ export function calculateEquity(playerHands: Card[][], board: Card[]): Simulatio
     if (seen.has(s)) throw new Error(`Duplicate card on board: ${s}`);
     seen.add(s);
   }
+  // Dead cards join `seen`, which is what keeps them out of the pool below.
+  // They take no board position, so they only ever shrink the run-outs.
+  for (const card of dead) {
+    const s = cardToString(card);
+    if (seen.has(s)) throw new Error(`Duplicate dead card: ${s}`);
+    seen.add(s);
+  }
 
   const numPlayers = playerHands.length;
   const known = board.length;
@@ -246,6 +262,13 @@ export function calculateEquity(playerHands: Card[][], board: Card[]): Simulatio
     }
   }
   const poolSize = pool.length;
+  const remaining = poolSize - known;
+  if (remaining < needed) {
+    throw new Error(
+      `Too many dead cards: ${needed} more board card${needed === 1 ? '' : 's'} ` +
+        `to come but only ${remaining} left in the deck`
+    );
+  }
   const { c2, c3, size: numTriples } = tripleTables(poolSize);
 
   // Score every (player, hole pair, board triple) once. Each player's table
