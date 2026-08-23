@@ -132,13 +132,20 @@ export async function detectCards(
     rows.forEach((row, seatIndex) => {
       const isHero = seatIndex === heroRow;
       const seat = isHero ? 0 : opponentSeat++;
-      row.forEach((card, cardIndex) => {
-        const reading = readBoardCard(imageData, card, cardIndex, templates);
+      let slot = 0;
+      row.forEach(card => {
+        const reading = readBoardCard(imageData, card, slot, templates);
+        // Regions that yield no glyph at all are not cards — they are chips,
+        // buttons and bars of table furniture that happened to group into a
+        // row. Showing them as unread cards would pad a hand with slots that
+        // can never be filled, so they are dropped rather than displayed.
+        if (!reading.signature) return;
         handReadings.push({
           ...reading,
           role: isHero ? 'hero' : 'opponent',
-          index: isHero ? cardIndex : seat * CARDS_PER_HAND + cardIndex,
+          index: isHero ? slot : seat * CARDS_PER_HAND + slot,
         });
+        slot++;
       });
     });
   }

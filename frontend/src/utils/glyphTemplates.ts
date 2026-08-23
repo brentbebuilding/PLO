@@ -139,6 +139,11 @@ export function extractSignature(
 
   if (inkCount < 6 || maxX < minX || maxY < minY) return null;
 
+  // A rank is strokes on a card, so it never fills its box. A patch that is
+  // almost entirely "ink" is a solid shape — a chip, a button, a bar of table
+  // furniture — and reading a rank out of it only ever produces noise.
+  if (inkCount > w * h * 0.75) return null;
+
   // Cards print the rank above the suit pip, and a crop generous enough to hold
   // every rank catches the top of the pip too. Keep only the ink above the first
   // blank row, so "10" over a club doesn't sign differently from "10" over a
