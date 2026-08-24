@@ -396,7 +396,14 @@ export function findHandRows(
         // candidate loses a short card joining a tall row; against the row,
         // a tall card joining a row that happens to start short.
         Math.abs(r[0].height - card.height) <
-          Math.max(r[0].height, card.height) * 0.35
+          Math.max(r[0].height, card.height) * 0.35 &&
+        // Width is held to much closer than that, because it is the dimension
+        // that stays true: clipping eats a card's lower edge, never its sides,
+        // so cards in a row measure within a pixel of each other. This is what
+        // keeps a player's avatar out of their hand — one sat 66px wide beside
+        // 38px cards, close enough in height and spacing to join the row, and
+        // a row of five is thrown away as not being a hand.
+        Math.max(r[0].width, card.width) / Math.min(r[0].width, card.width) < 1.4
     );
     if (row) row.push(card);
     else rows.push([card]);
