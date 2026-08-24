@@ -51,6 +51,20 @@ const MIN_SCORE = 0.85;
 /** A win this narrow over the runner-up means two ranks looked alike. */
 const MIN_MARGIN = 0.05;
 
+/**
+ * A read this far ahead of the runner-up is accepted a little below the score
+ * floor.
+ *
+ * The floor exists because ranks resemble each other — an eight scored 0.85
+ * against a queen's template while two clean eights scored 0.73 — and the
+ * defence against that is the gap to the second-best rank, not the absolute
+ * score. A heavily dimmed ten came back at 0.838, just under the floor, having
+ * beaten every other rank by 0.42. Declining that is throwing away a certain
+ * read to guard against a confusion that a margin of 0.42 rules out.
+ */
+const CONFIDENT_SCORE = 0.8;
+const CONFIDENT_MARGIN = 0.25;
+
 export interface SlotReading {
   role: SlotRole;
   index: number;
@@ -272,7 +286,10 @@ function finishReading(
     return { ...base, signature, note: 'no templates' };
   }
 
-  if (match.score < MIN_SCORE) {
+  const confident =
+    match.score >= CONFIDENT_SCORE && match.margin >= CONFIDENT_MARGIN;
+
+  if (match.score < MIN_SCORE && !confident) {
     return {
       ...base,
       signature,
