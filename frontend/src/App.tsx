@@ -49,6 +49,8 @@ function App() {
     { players: DisplayResult[]; stage: Stage; boards: number } | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+  /** The user's equity at each street the board has already passed. */
+  const [history, setHistory] = useState<{ street: string; equity: number }[]>([]);
 
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [isReading, setIsReading] = useState(false);
@@ -81,6 +83,7 @@ function App() {
     const complete = seats.filter(hand => hand.every(c => c !== null)) as Card[][];
     if (complete.length < 2) {
       setEquity(null);
+      setHistory([]);
       return;
     }
 
@@ -106,6 +109,32 @@ function App() {
             equity: p.equity,
           })),
         });
+        // How the user's equity stood at each earlier street. A screenshot
+        // arrives with the whole board already dealt, so this is the only way
+        // to see how the hand actually ran — the number under their cards is
+        // the finished article and says nothing about how it got there.
+        const heroAt = seatOf.indexOf(0);
+        if (heroAt < 0) {
+          setHistory([]);
+        } else {
+          const dealt = board.filter((c): c is Card => c !== null);
+          const past: { street: string; equity: number }[] = [];
+          for (const [street, count] of [
+            ['Preflop', 0],
+            ['Flop', 3],
+            ['Turn', 4],
+          ] as [string, number][]) {
+            if (count >= dealt.length) continue;
+            const at = calculateEquity(
+              complete,
+              dealt.slice(0, count),
+              dead.filter((c): c is Card => c !== null)
+            );
+            past.push({ street, equity: at.players[heroAt].equity });
+          }
+          setHistory(past);
+        }
+
         setError(null);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Could not calculate equity');
@@ -157,6 +186,7 @@ function App() {
   };
 
   const newHand = () => {
+    setHistory([]);
     setSeats(emptySeats());
     setBoard(Array.from({ length: BOARD_SIZE }, () => null));
     setDead(Array.from({ length: DEAD_CARD_SLOTS }, () => null));
@@ -317,12 +347,30 @@ function App() {
               isNarrow ? 'flex-wrap' : 'flex-nowrap'
             }`}
           >
-            <CardRail
-              used={usedCards}
-              onPick={placeCard}
-              disabled={!selected}
-              compact={isNarrow}
-            />
+            <div className="flex flex-col gap-1 min-w-0">
+              <CardRail
+                used={usedCards}
+                onPick={placeCard}
+                disabled={!selected}
+                compact={isNarrow}
+              />
+
+              {/* Reserves its line whether or not there is a hand to describe,
+                  so arriving at one doesn't resize the table under it. */}
+              <div className="h-4 flex items-baseline gap-3 text-[11px] leading-none">
+                {history.length > 0 && (
+                  <>
+                    <span className="text-emerald-300 font-medium">Your equity</span>
+                    {history.map(({ street, equity: value }) => (
+                      <span key={street} className="text-neutral-400 whitespace-nowrap">
+                        {street}{' '}
+                        <span className="text-white font-medium">{value.toFixed(2)}%</span>
+                      </span>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
 
             <div
               className={`flex flex-col gap-1.5 ${
@@ -438,7 +486,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 8.7
+        Runs entirely in your browser · nothing is uploaded · VERSION 8.8
       </footer>
     </div>
   );
