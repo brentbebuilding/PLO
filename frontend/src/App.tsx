@@ -50,7 +50,9 @@ function App() {
   >(null);
   const [error, setError] = useState<string | null>(null);
   /** The user's equity at each street the board has already passed. */
-  const [history, setHistory] = useState<{ street: string; equity: number }[]>([]);
+  const [history, setHistory] = useState<
+    { street: string; win: number; tie: number }[]
+  >([]);
 
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [isReading, setIsReading] = useState(false);
@@ -118,7 +120,7 @@ function App() {
           setHistory([]);
         } else {
           const dealt = board.filter((c): c is Card => c !== null);
-          const past: { street: string; equity: number }[] = [];
+          const past: { street: string; win: number; tie: number }[] = [];
           for (const [street, count] of [
             ['Preflop', 0],
             ['Flop', 3],
@@ -130,7 +132,12 @@ function App() {
               dealt.slice(0, count),
               dead.filter((c): c is Card => c !== null)
             );
-            past.push({ street, equity: at.players[heroAt].equity });
+            const seat = at.players[heroAt];
+            past.push({
+              street,
+              win: seat.winPercentage,
+              tie: seat.tiePercentage,
+            });
           }
           setHistory(past);
         }
@@ -360,11 +367,24 @@ function App() {
               <div className="h-4 flex items-baseline gap-3 text-[11px] leading-none">
                 {history.length > 0 && (
                   <>
-                    <span className="text-emerald-300 font-medium">Your equity</span>
-                    {history.map(({ street, equity: value }) => (
+                    {/* Win and tie separately, the same pair of numbers the
+                        seat readouts show. Showing the two added together
+                        here read as disagreeing with the seat: one flop had
+                        51.25% under the deck and "Win 40.99%" on the felt,
+                        the difference being ties. */}
+                    <span className="text-emerald-300 font-medium whitespace-nowrap">
+                      Your equity <span className="text-neutral-500">(win / tie)</span>
+                    </span>
+                    {history.map(({ street, win, tie }) => (
                       <span key={street} className="text-neutral-400 whitespace-nowrap">
                         {street}{' '}
-                        <span className="text-white font-medium">{value.toFixed(2)}%</span>
+                        <span className="text-white font-medium">{win.toFixed(2)}%</span>
+                        {tie > 0 && (
+                          <>
+                            <span className="text-neutral-500"> / </span>
+                            <span className="text-white font-medium">{tie.toFixed(2)}%</span>
+                          </>
+                        )}
                       </span>
                     ))}
                   </>
@@ -486,7 +506,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 8.9
+        Runs entirely in your browser · nothing is uploaded · VERSION 9.0
       </footer>
     </div>
   );
