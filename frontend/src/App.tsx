@@ -192,23 +192,6 @@ function App() {
     setSelected(slot);
   };
 
-  /**
-   * Move a seat's hand into the user's own, swapping whatever was there.
-   *
-   * The read cannot always tell which hand belongs to the user, and when it
-   * cannot the hand lands in an opponent seat. Retyping four cards to correct
-   * that is worse than pointing at the right one.
-   */
-  const makeHero = (seatIndex: number) => {
-    if (seatIndex === 0) return;
-    setSeats(prev =>
-      prev.map((hand, i) =>
-        i === 0 ? prev[seatIndex] : i === seatIndex ? prev[0] : hand
-      )
-    );
-    setSelected(null);
-  };
-
   const newHand = () => {
     setHistory([]);
     setSeats(emptySeats());
@@ -501,7 +484,6 @@ function App() {
               selected={selected}
               onSelect={selectSlot}
               equity={seatEquity}
-              onMakeHero={makeHero}
               compact={isNarrow}
             />
           </div>
@@ -524,7 +506,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 9.1
+        Runs entirely in your browser · nothing is uploaded · VERSION 9.0
       </footer>
     </div>
   );

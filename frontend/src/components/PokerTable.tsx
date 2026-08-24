@@ -124,8 +124,6 @@ interface PokerTableProps {
   onSelect: (slot: SlotRef) => void;
   /** Indexed by seat; absent entries simply show nothing. */
   equity?: (SeatEquity | null)[];
-  /** Claim a seat's hand as the user's own, swapping it with the top seat. */
-  onMakeHero?: (seatIndex: number) => void;
   /** Phone layout: a near-square felt with the ring spread down it. */
   compact?: boolean;
 }
@@ -136,7 +134,6 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   selected,
   onSelect,
   equity,
-  onMakeHero,
   compact,
 }) => (
   <div
@@ -205,7 +202,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             onClick={() => onSelect({ group: seatIndex, index: cardIndex })}
           />
         ))}
-        {seatIndex === 0 ? (
+        {seatIndex === 0 && (
           <span
             style={{
               fontSize: 'calc(var(--seat-card-w) * 0.28)',
@@ -218,25 +215,6 @@ export const PokerTable: React.FC<PokerTableProps> = ({
           >
             You
           </span>
-        ) : (
-          hand.some(card => card !== null) &&
-          onMakeHero && (
-            // A screenshot doesn't always say which hand is the user's — an
-            // avatar can be covered by an "All in" badge, or the hand may not
-            // be in the panel at all — and when it can't be told the hand
-            // lands in an opponent seat. One click moves it.
-            <button
-              onClick={() => onMakeHero(seatIndex)}
-              title="This is my hand"
-              style={{
-                fontSize: 'calc(var(--seat-card-w) * 0.28)',
-                bottom: 'calc(100% + 2px)',
-              }}
-              className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-neutral-400 hover:text-emerald-300 font-medium"
-            >
-              This is me
-            </button>
-          )
         )}
 
         {equity?.[seatIndex] && (
