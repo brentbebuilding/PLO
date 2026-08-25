@@ -153,25 +153,54 @@ export function findCardRegions(
   }));
   if (refs.length === 0) return [];
 
+  /*
+   * Labelling runs over every pixel in the image — four and a half million of
+   * them on a large screenshot — so it is written out flat rather than through
+   * the helpers above, which is worth the repetition here and nowhere else.
+   *
+   * Calling features() per pixel returned a fresh three-element array each
+   * time; the chromaticity and saturation are held in three locals instead.
+   * Distances are compared squared, against a squared tolerance, which is the
+   * same comparison without a square root — Math.hypot is careful about
+   * overflow in a way that costs, and these numbers are all between zero and
+   * one.
+   */
+  const refChromaR = refs.map(ref => ref.features[0]);
+  const refChromaG = refs.map(ref => ref.features[1]);
+  const refAchromatic = refs.map(ref => ref.features[2] <= ACHROMATIC_REF);
+  const tolerance = CHROMA_TOLERANCE * CHROMA_TOLERANCE;
+
   const labels = new Int8Array(W * H).fill(-1);
-  for (let i = 0; i < W * H; i++) {
-    const r = data[i * 4];
-    const g = data[i * 4 + 1];
-    const b = data[i * 4 + 2];
+  for (let i = 0, at = 0; i < W * H; i++, at += 4) {
+    const r = data[at];
+    const g = data[at + 1];
+    const b = data[at + 2];
     if (0.299 * r + 0.587 * g + 0.114 * b < MIN_LUMINANCE) continue;
 
-    const f = features(r, g, b);
+    const sum = r + g + b || 1;
+    const chromaR = r / sum;
+    const chromaG = g / sum;
+    const max = r > g ? (r > b ? r : b) : g > b ? g : b;
+    const min = r < g ? (r < b ? r : b) : g < b ? g : b;
+    const saturation = max === 0 ? 0 : (max - min) / max;
+
+    const canBeAchromatic = saturation <= ACHROMATIC_MAX;
+    const canBeChromatic = saturation >= CHROMATIC_MIN;
+    if (!canBeAchromatic && !canBeChromatic) continue;
+
     let best = -1;
-    let bestDistance = Infinity;
+    let bestDistance = tolerance;
     for (let k = 0; k < refs.length; k++) {
-      if (!saturationAgrees(f[2], refs[k].features[2])) continue;
-      const d = chromaDistance(f, refs[k].features);
+      if (refAchromatic[k] ? !canBeAchromatic : !canBeChromatic) continue;
+      const dr = chromaR - refChromaR[k];
+      const dg = chromaG - refChromaG[k];
+      const d = dr * dr + dg * dg;
       if (d < bestDistance) {
         bestDistance = d;
         best = k;
       }
     }
-    if (best >= 0 && bestDistance < CHROMA_TOLERANCE) labels[i] = best;
+    if (best >= 0) labels[i] = best;
   }
 
   const seen = new Uint8Array(W * H);
@@ -731,38 +760,6 @@ function buildIntegral(image: PixelSource): Integral {
   return { width: W, height: H, sums };
 }
 
-/** Mean colour of a rectangle, clamped to the image. */
-function meanColor(
-  integral: Integral,
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  out: number[],
-  at: number
-): void {
-  const { width: W, height: H, sums } = integral;
-  const stride = (W + 1) * 3;
-  const ax = Math.max(0, Math.min(W, Math.round(x0)));
-  const ay = Math.max(0, Math.min(H, Math.round(y0)));
-  const bx = Math.max(0, Math.min(W, Math.round(x1)));
-  const by = Math.max(0, Math.min(H, Math.round(y1)));
-
-  const area = (bx - ax) * (by - ay);
-  if (area <= 0) {
-    out[at] = out[at + 1] = out[at + 2] = 0;
-    return;
-  }
-
-  const A = ay * stride + ax * 3;
-  const B = ay * stride + bx * 3;
-  const C = by * stride + ax * 3;
-  const D = by * stride + bx * 3;
-  out[at] = (sums[D] - sums[B] - sums[C] + sums[A]) / area;
-  out[at + 1] = (sums[D + 1] - sums[B + 1] - sums[C + 1] + sums[A + 1]) / area;
-  out[at + 2] = (sums[D + 2] - sums[B + 2] - sums[C + 2] + sums[A + 2]) / area;
-}
-
 /** Avatar grid resolution. 8x8 carries enough of a face to be distinctive. */
 const AVATAR_GRID = 8;
 
@@ -771,6 +768,11 @@ const AVATAR_GRID = 8;
  *
  * Sampling a fixed grid rather than fixed pixels is what lets a 60px panel
  * thumbnail be compared against the same avatar drawn at 90px on the table.
+ *
+ * The seat search asks for tens of thousands of these, so the grid's edges are
+ * worked out once for the whole box rather than per cell — each of the
+ * sixty-four cells was recomputing and re-rounding both of its own, which is
+ * four times the arithmetic for the same numbers.
  */
 function avatarSignature(
   integral: Integral,
@@ -779,19 +781,40 @@ function avatarSignature(
   w: number,
   h: number
 ): number[] {
+  const { width: W, height: H, sums } = integral;
+  const stride = (W + 1) * 3;
+
+  const xs = new Array<number>(AVATAR_GRID + 1);
+  const ys = new Array<number>(AVATAR_GRID + 1);
+  for (let i = 0; i <= AVATAR_GRID; i++) {
+    xs[i] = Math.max(0, Math.min(W, Math.round(x + (w * i) / AVATAR_GRID)));
+    ys[i] = Math.max(0, Math.min(H, Math.round(y + (h * i) / AVATAR_GRID)));
+  }
+
   const out = new Array<number>(AVATAR_GRID * AVATAR_GRID * 3);
   let at = 0;
   for (let gy = 0; gy < AVATAR_GRID; gy++) {
+    const top = ys[gy];
+    const bottom = ys[gy + 1];
+    const above = top * stride;
+    const below = bottom * stride;
+    const height = bottom - top;
     for (let gx = 0; gx < AVATAR_GRID; gx++) {
-      meanColor(
-        integral,
-        x + (w * gx) / AVATAR_GRID,
-        y + (h * gy) / AVATAR_GRID,
-        x + (w * (gx + 1)) / AVATAR_GRID,
-        y + (h * (gy + 1)) / AVATAR_GRID,
-        out,
-        at
-      );
+      const left = xs[gx];
+      const right = xs[gx + 1];
+      const area = (right - left) * height;
+      if (area <= 0) {
+        out[at] = out[at + 1] = out[at + 2] = 0;
+        at += 3;
+        continue;
+      }
+      const a = above + left * 3;
+      const b = above + right * 3;
+      const c = below + left * 3;
+      const d = below + right * 3;
+      out[at] = (sums[d] - sums[b] - sums[c] + sums[a]) / area;
+      out[at + 1] = (sums[d + 1] - sums[b + 1] - sums[c + 1] + sums[a + 1]) / area;
+      out[at + 2] = (sums[d + 2] - sums[b + 2] - sums[c + 2] + sums[a + 2]) / area;
       at += 3;
     }
   }
