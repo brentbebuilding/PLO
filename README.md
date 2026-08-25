@@ -28,6 +28,12 @@ equity, a missing one is obvious.
 nothing about how the hand actually ran. Alongside the final number your equity
 is shown as it stood preflop, on the flop and on the turn.
 
+**Sharing.** Copy link puts the whole table in the address — every hand, the
+board and the dead cards — so a spot can be sent to someone or bookmarked. It
+rides in the URL's fragment, which browsers never send to the server, so a
+shared hand stays as private as everything else here. Hands are also kept as
+you move on from them, under Recent.
+
 **Dead cards.** Fourteen slots for cards known to be out of the deck — folded
 hands, cards exposed by a misdeal — which are removed from the enumeration
 rather than left live.

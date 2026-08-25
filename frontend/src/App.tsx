@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card } from './types';
 import { calculateEquity, SimulationResult } from './utils/equity';
 import { detectCards } from './utils/cardDetection';
@@ -14,7 +14,17 @@ import PokerTable, {
   sameSlot,
 } from './components/PokerTable';
 import useIsNarrow from './hooks/useIsNarrow';
-import { Github, Loader2, RefreshCw, Upload } from 'lucide-react';
+import {
+  TableState,
+  decodeTable,
+  encodeTable,
+  linkTo,
+  loadRecent,
+  payloadInAddress,
+  remember,
+  RecentHand,
+} from './utils/handLink';
+import { Check, Clock, Github, Link2, Loader2, RefreshCw, Upload } from 'lucide-react';
 
 const DEAD_CARD_SLOTS = 14;
 
@@ -33,18 +43,46 @@ const emptySeats = () =>
     Array.from({ length: CARDS_PER_SEAT }, () => null as Card | null)
   );
 
+const emptyBoard = () => Array.from({ length: BOARD_SIZE }, () => null as Card | null);
+const emptyDead = () =>
+  Array.from({ length: DEAD_CARD_SLOTS }, () => null as Card | null);
+
+/** Cut or pad a restored row to the length this table actually has. */
+function fit(row: (Card | null)[] | undefined, length: number): (Card | null)[] {
+  return Array.from({ length }, (_, i) => row?.[i] ?? null);
+}
+
+/**
+ * The hand named in the address, read once before anything renders.
+ *
+ * Module scope rather than an effect: restoring after the first paint would
+ * show an empty table and then fill it, and the equity below it would run
+ * twice.
+ */
+const shared = decodeTable(payloadInAddress());
+
 function App() {
-  const [seats, setSeats] = useState<(Card | null)[][]>(emptySeats);
+  const [seats, setSeats] = useState<(Card | null)[][]>(() =>
+    shared
+      ? Array.from({ length: SEAT_COUNT }, (_, i) =>
+          fit(shared.seats[i], CARDS_PER_SEAT)
+        )
+      : emptySeats()
+  );
   const [board, setBoard] = useState<(Card | null)[]>(() =>
-    Array.from({ length: BOARD_SIZE }, () => null)
+    shared ? fit(shared.board, BOARD_SIZE) : emptyBoard()
   );
   const [dead, setDead] = useState<(Card | null)[]>(() =>
-    Array.from({ length: DEAD_CARD_SLOTS }, () => null)
+    shared ? fit(shared.dead, DEAD_CARD_SLOTS) : emptyDead()
   );
 
   const isNarrow = useIsNarrow();
 
-  const [selected, setSelected] = useState<SlotRef | null>({ group: 0, index: 0 });
+  const [selected, setSelected] = useState<SlotRef | null>(() =>
+    shared ? firstEmptySlot(shared.seats, shared.board) : { group: 0, index: 0 }
+  );
+  const [copied, setCopied] = useState(false);
+  const [recent, setRecent] = useState<RecentHand[] | null>(null);
   const [equity, setEquity] = useState<
     { players: DisplayResult[]; stage: Stage; boards: number } | null
   >(null);
@@ -192,11 +230,49 @@ function App() {
     setSelected(slot);
   };
 
+  const table: TableState = useMemo(
+    () => ({ seats, board, dead }),
+    [seats, board, dead]
+  );
+
+  /*
+   * The address always names the hand on the table, so sharing it is copying
+   * the address and nothing has to be pressed first. Replaced rather than
+   * pushed: every card placed would otherwise be a step in the browser's
+   * history, and Back would walk out of the hand one card at a time.
+   */
+  useEffect(() => {
+    const payload = encodeTable(table);
+    const here = window.location.pathname + window.location.search;
+    window.history.replaceState(null, '', payload ? `${here}#h=${payload}` : here);
+  }, [table]);
+
+  // Read by the handlers below that are deliberately built once — taking the
+  // table as a dependency would rebuild them on every card placed, and the
+  // listeners they install with them.
+  const tableRef = useRef(table);
+  useEffect(() => {
+    tableRef.current = table;
+  }, [table]);
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(linkTo(table));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Clipboard access is refused outside a secure context and in some
+      // embedded browsers. The address bar holds the same link either way.
+      setError('Could not reach the clipboard — the address bar has the link.');
+    }
+  };
+
   const newHand = () => {
+    remember(table);
     setHistory([]);
     setSeats(emptySeats());
-    setBoard(Array.from({ length: BOARD_SIZE }, () => null));
-    setDead(Array.from({ length: DEAD_CARD_SLOTS }, () => null));
+    setBoard(emptyBoard());
+    setDead(emptyDead());
     setSelected({ group: 0, index: 0 });
     setEquity(null);
     setScreenshot(null);
@@ -204,8 +280,55 @@ function App() {
     setError(null);
   };
 
+  /** Deal a whole table at once — from a link, or from the recent list. */
+  const putOnTable = useCallback((state: TableState) => {
+    setSeats(
+      Array.from({ length: SEAT_COUNT }, (_, i) => fit(state.seats[i], CARDS_PER_SEAT))
+    );
+    setBoard(fit(state.board, BOARD_SIZE));
+    setDead(fit(state.dead, DEAD_CARD_SLOTS));
+    setSelected(firstEmptySlot(state.seats, state.board));
+    setHistory([]);
+    setScreenshot(null);
+    setReadNote(null);
+    setError(null);
+  }, []);
+
+  const restore = (payload: string) => {
+    const state = decodeTable(payload);
+    if (!state) return;
+    remember(table);
+    putOnTable(state);
+    setRecent(null);
+  };
+
+  /*
+   * A link pasted into a tab that already has the app open changes only the
+   * fragment, which the browser treats as staying on the same page — nothing
+   * reloads and the hand would never arrive. Back and Forward land here too.
+   *
+   * Writing the fragment ourselves does not: replaceState is silent by design,
+   * which is what keeps this from answering its own edits. The comparison is a
+   * second guard, for a link that happens to name the hand already laid out.
+   */
+  useEffect(() => {
+    const onHashChange = () => {
+      const payload = payloadInAddress();
+      if (!payload || payload === encodeTable(tableRef.current)) return;
+      const state = decodeTable(payload);
+      if (!state) return;
+      // Following a link is moving on from whatever was on the table, same as
+      // pressing New Hand, so the outgoing hand is kept.
+      remember(tableRef.current);
+      putOnTable(state);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [putOnTable]);
+
   /** Read a dropped screenshot into the table. */
   const readScreenshot = useCallback(async (src: string) => {
+    remember(tableRef.current);
     setScreenshot(src);
     setIsReading(true);
     setReadNote(null);
@@ -328,10 +451,32 @@ function App() {
         }) as React.CSSProperties
       }
     >
-      <header className="px-4 py-2 flex items-center justify-between border-b border-neutral-800 shrink-0">
+      <header className="relative px-4 py-2 flex items-center justify-between border-b border-neutral-800 shrink-0">
         <h1 className="text-lg font-bold">Omaha Odds Calculator</h1>
         <div className="flex items-center gap-3 text-xs text-neutral-400">
-          <span className="hidden md:inline">Pot Limit Omaha equity, in your browser</span>
+          <span className="hidden lg:inline">Pot Limit Omaha equity, in your browser</span>
+
+          {/* Sharing lives up here rather than beside the table. Everything in
+              the column below is measured to fit one viewport, and a control
+              added to it takes its height off the felt. */}
+          <button
+            onClick={copyLink}
+            title="Copy a link to this hand"
+            className="flex items-center gap-1 px-2 py-1 rounded hover:bg-neutral-800 hover:text-white"
+          >
+            {copied ? <Check size={14} className="text-emerald-400" /> : <Link2 size={14} />}
+            <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy link'}</span>
+          </button>
+
+          <button
+            onClick={() => setRecent(recent ? null : loadRecent())}
+            title="Hands you have looked at"
+            className="flex items-center gap-1 px-2 py-1 rounded hover:bg-neutral-800 hover:text-white"
+          >
+            <Clock size={14} />
+            <span className="hidden sm:inline">Recent</span>
+          </button>
+
           <a
             href="https://github.com/brentbebuilding/PLO"
             target="_blank"
@@ -341,6 +486,31 @@ function App() {
             <Github size={18} />
           </a>
         </div>
+
+        {/* Floated clear of the flow, so opening it moves nothing. */}
+        {recent && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setRecent(null)} />
+            <div className="absolute right-3 top-full mt-1 z-20 w-56 rounded border border-neutral-700 bg-neutral-900 shadow-xl py-1 text-xs">
+              {recent.length === 0 ? (
+                <div className="px-3 py-2 text-neutral-500">
+                  Nothing yet. Hands are kept here as you move on from them.
+                </div>
+              ) : (
+                recent.map(hand => (
+                  <button
+                    key={hand.payload}
+                    onClick={() => restore(hand.payload)}
+                    className="w-full text-left px-3 py-1.5 hover:bg-neutral-800 flex items-center justify-between gap-2"
+                  >
+                    <span className="font-mono text-neutral-200">{hand.label}</span>
+                    <span className="text-neutral-500 shrink-0">{ago(hand.at)}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </>
+        )}
       </header>
 
       <main className="bg-[#4a1414] px-3 py-2 flex-1 min-h-0 flex flex-col">
@@ -506,7 +676,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 9.4
+        Runs entirely in your browser · nothing is uploaded · VERSION 9.5
       </footer>
     </div>
   );
@@ -517,6 +687,16 @@ function App() {
  * then the other seats. Falls back to the user's first card when nothing is
  * missing, which is also the right place to start on an empty table.
  */
+/** How long ago, shortened to fit beside a hand in the recent list. */
+function ago(at: number): string {
+  const minutes = Math.round((Date.now() - at) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
 function firstEmptySlot(seats: (Card | null)[][], board: (Card | null)[]): SlotRef {
   const heroGap = seats[0]?.findIndex(c => c === null) ?? -1;
   if (heroGap >= 0 && seats[0].some(c => c !== null)) return { group: 0, index: heroGap };
