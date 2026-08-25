@@ -88,6 +88,8 @@ export interface DetectionResult {
   board: Card[];
   /** Per-slot detail, including failures — drives the review UI. */
   readings: SlotReading[];
+  /** How long the read took, decoding the screenshot included. */
+  elapsedMs?: number;
   message?: string;
 }
 
@@ -103,6 +105,10 @@ export async function detectCards(
   if (templates.length === 0) {
     return emptyResult('No rank templates taught yet.');
   }
+
+  // Timed from here, so the figure covers decoding the screenshot as well as
+  // reading it — that is the wait, and separating them would flatter the read.
+  const startedAt = performance.now();
 
   let imageData: ImageData;
   try {
@@ -199,15 +205,18 @@ export async function detectCards(
   const total =
     hero.length + board.length + villains.reduce((sum, hand) => sum + hand.length, 0);
 
+  const elapsedMs = performance.now() - startedAt;
+
   return {
     success: total > 0,
     hero,
     villains,
     board,
     readings,
+    elapsedMs,
     message:
       total > 0
-        ? `Read ${total} card${total === 1 ? '' : 's'}` +
+        ? `Read ${total} card${total === 1 ? '' : 's'} in ${describeElapsed(elapsedMs)}` +
           (anchor ? '' : ' (preflop — no community cards dealt)') +
           // Say so rather than leaving them to notice the empty seat, since
           // the hands that did read look no different either way.
@@ -216,6 +225,17 @@ export async function detectCards(
             : '')
         : 'No cards read. Is a hand visible in this screenshot?',
   };
+}
+
+/**
+ * How long the read took, in whichever unit reads plainly.
+ *
+ * Milliseconds up to a second, because that is the range this lives in and a
+ * change of fifty of them is worth seeing; seconds beyond, where three digits
+ * of precision would be noise.
+ */
+function describeElapsed(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
 function emptyResult(message: string): DetectionResult {
