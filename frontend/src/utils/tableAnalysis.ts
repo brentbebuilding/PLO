@@ -141,12 +141,30 @@ function saturationAgrees(pixelSaturation: number, referenceSaturation: number):
  * Labels each pixel with the nearest suit colour, then takes connected
  * components of matching labels.
  */
+/**
+ * Smallest blob worth calling a card, as a share of the image.
+ *
+ * A fixed count cannot be right for every window. The client scales its whole
+ * table with its window, so a panel card that covers 1700 pixels on a
+ * 2538-wide screenshot covers 540 on a 1478-wide one — and at 400 the dim ones
+ * fell under the bar and simply went missing, which is how a hand came back
+ * holding two cards instead of four.
+ *
+ * Capped rather than scaled in both directions. Raising the bar on a large
+ * screenshot would drop cards that read correctly today, and this is measured
+ * on rather less evidence than that would be risking.
+ */
+const MIN_REGION_SHARE = 1.2e-4;
+const MIN_REGION_CAP = 400;
+
 export function findCardRegions(
   image: PixelSource,
   references: SuitReference[] = DEFAULT_SUIT_REFERENCES,
-  minPixels = 400
+  minPixels?: number
 ): CardRegion[] {
   const { width: W, height: H, data } = image;
+  const floor =
+    minPixels ?? Math.min(MIN_REGION_CAP, Math.round(W * H * MIN_REGION_SHARE));
   const refs = references.map(ref => ({
     suit: ref.suit,
     features: features(ref.r, ref.g, ref.b),
@@ -237,7 +255,7 @@ export function findCardRegions(
       if (y < H - 1 && !seen[p + W] && labels[p + W] === label) { seen[p + W] = 1; stack[sp++] = p + W; }
     }
 
-    if (count < minPixels) continue;
+    if (count < floor) continue;
 
     const width = maxX - minX + 1;
     const height = maxY - minY + 1;
@@ -472,7 +490,17 @@ export function findHandRows(
 
   const filled = image ? chosen.map(row => fillRowGaps(row, image)) : chosen;
   const faceUp = image ? filled.filter(row => !isFaceDown(row, image)) : filled;
-  return faceUp.map(squareUpRow).sort((a, b) => a[0].y - b[0].y);
+
+  // Sized against the board only after each row has been squared up to its own
+  // median. A dimmed card stops registering partway down and comes back short,
+  // so the first card's own height is not the row's — judging by it threw away
+  // whole hands that were there.
+  const squared = faceUp.map(squareUpRow);
+  const sized =
+    board.cards.length === 0
+      ? squared
+      : squared.filter(row => isCardSized(row[0].height, board));
+  return sized.sort((a, b) => a[0].y - b[0].y);
 }
 
 /**
@@ -531,6 +559,28 @@ function isFaceDown(row: CardRegion[], image: PixelSource): boolean {
  * came close on likeness also agreed on suit.
  */
 const FACE_DOWN_MIN_LIKENESS = 0.68;
+
+/**
+ * Whether cards this tall could belong to a hand, given the board.
+ *
+ * The client lays its panel out in proportion to the table like everything
+ * else: measured across every screenshot to hand, a panel row's cards are 0.51
+ * to 0.53 of a board card, at every window size. Cards lying on the felt are
+ * drawn nearer a board card's own size.
+ *
+ * The band is far wider than either, because it only has to catch things that
+ * are not cards. Lowering the smallest blob worth keeping — which a small
+ * window needs, or its dim cards never register — let two pieces of the
+ * "Won:-1.90" line along the bottom through as a pair of spades. They measured
+ * 0.32 and would have been shown as somebody's hand.
+ */
+const MIN_HAND_CARD_RATIO = 0.4;
+const MAX_HAND_CARD_RATIO = 1.3;
+
+function isCardSized(height: number, board: BoardAnchor): boolean {
+  const ratio = height / board.unitY;
+  return ratio >= MIN_HAND_CARD_RATIO && ratio <= MAX_HAND_CARD_RATIO;
+}
 
 /**
  * Restore every card in a row to the row's own size.

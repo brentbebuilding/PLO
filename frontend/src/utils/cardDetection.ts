@@ -65,6 +65,26 @@ const MIN_MARGIN = 0.05;
 const CONFIDENT_SCORE = 0.8;
 const CONFIDENT_MARGIN = 0.25;
 
+/**
+ * How tall a rank has to be drawn to be held to the full floor, and the floor
+ * for one drawn smaller.
+ *
+ * A rank is matched by stretching it to a fixed grid and correlating against
+ * templates. How well the best template can possibly fit depends on how much
+ * of the rank there was to stretch: on a small window the client draws these
+ * eleven or twelve pixels tall, and stretching that to the grid invents detail
+ * that cannot line up with a template taken from twenty.
+ *
+ * Measured across every screenshot to hand — 370 cards with a rank on them.
+ * Every read the old floor rejected was in fact correct and every one came
+ * from the same small window: a three at 0.782 over a two at 0.699, a king at
+ * 0.769 over an eight at 0.637. The only genuine non-match in the whole set
+ * scored 0.474 and beat its runner-up by 0.031, so it stays refused twice
+ * over, by score and by margin both.
+ */
+const FULL_DETAIL_GLYPH = 16;
+const SMALL_GLYPH_MIN_SCORE = 0.75;
+
 export interface SlotReading {
   role: SlotRole;
   index: number;
@@ -254,12 +274,14 @@ function readBoardCard(
   index: number,
   templates: GlyphTemplate[]
 ): SlotReading {
-  const signature = extractSignature(imageData, rankGlyphBounds(card));
+  const bounds = rankGlyphBounds(card);
+  const signature = extractSignature(imageData, bounds);
   return finishReading(
     { role: 'board', index, card: null, score: 0, margin: 0 },
     signature,
     card.suit,
-    templates
+    templates,
+    bounds.height
   );
 }
 
@@ -286,7 +308,7 @@ function readSeatSlot(
     return { ...base, signature: signature ?? undefined, note: 'suit unclear' };
   }
 
-  return finishReading(base, signature, suit, templates);
+  return finishReading(base, signature, suit, templates, bounds.height);
 }
 
 /** Shared tail: match the rank and decide whether the read is trustworthy. */
@@ -294,7 +316,9 @@ function finishReading(
   base: SlotReading,
   signature: Signature | null,
   suit: Suit,
-  templates: GlyphTemplate[]
+  templates: GlyphTemplate[],
+  /** Height of the rank as drawn, before it was stretched to the grid. */
+  glyphHeight: number
 ): SlotReading {
   if (!signature) {
     // No ink — an empty seat, an undealt street, or a face-down card.
@@ -308,8 +332,10 @@ function finishReading(
 
   const confident =
     match.score >= CONFIDENT_SCORE && match.margin >= CONFIDENT_MARGIN;
+  const floor =
+    glyphHeight >= FULL_DETAIL_GLYPH ? MIN_SCORE : SMALL_GLYPH_MIN_SCORE;
 
-  if (match.score < MIN_SCORE && !confident) {
+  if (match.score < floor && !confident) {
     return {
       ...base,
       signature,
