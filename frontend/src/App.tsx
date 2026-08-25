@@ -506,7 +506,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 9.0
+        Runs entirely in your browser · nothing is uploaded · VERSION 9.3
       </footer>
     </div>
   );
