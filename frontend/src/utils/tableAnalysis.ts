@@ -442,12 +442,7 @@ export function findHandRows(
   const chosen = inPanel.length > 0 ? inPanel : usable;
 
   const filled = image ? chosen.map(row => fillRowGaps(row, image)) : chosen;
-  // One integral for the whole check — it is a prefix sum over every pixel in
-  // the image, and building one per row was minutes of work to save seconds.
-  const integral = image ? buildIntegral(image) : null;
-  const faceUp = integral
-    ? filled.filter(row => !isFaceDown(row, integral))
-    : filled;
+  const faceUp = image ? filled.filter(row => !isFaceDown(row, image)) : filled;
   return faceUp.map(squareUpRow).sort((a, b) => a[0].y - b[0].y);
 }
 
@@ -472,18 +467,20 @@ export function findHandRows(
  * are the same grey — and rules out the one real hand that could otherwise
  * trip this, four of a kind in the hole, whose four cards are four suits.
  */
-function isFaceDown(row: CardRegion[], integral: Integral): boolean {
+function isFaceDown(row: CardRegion[], image: PixelSource): boolean {
   // Two cards are not enough to argue from: a genuine pair sits at the top of
   // this range, and a two-card row is a partial read of a real hand often
   // enough to be worth keeping.
   if (row.length < 3) return false;
   if (!row.every(card => card.suit === row[0].suit)) return false;
 
+  // Sampled straight from the pixels. The boxes here are a rank's worth each —
+  // a few hundred pixels — and building the prefix-sum table that would answer
+  // them in constant time costs more than a hundred megabytes on a large
+  // screenshot, which is a great deal of work to save none.
   const ranks = row.map(card => {
     const box = rankGlyphBounds(card);
-    return box
-      ? avatarSignature(integral, box.x, box.y, box.width, box.height)
-      : null;
+    return box ? crop(image, box.x, box.y, box.width, box.height) : null;
   });
 
   for (let a = 0; a < ranks.length; a++)
@@ -801,14 +798,42 @@ function avatarSignature(
   return out;
 }
 
-/** How much a signature varies — flat crops are not worth correlating. */
-function contrast(signature: number[]): number {
-  let mean = 0;
-  for (const v of signature) mean += v;
-  mean /= signature.length;
-  let sum = 0;
-  for (const v of signature) sum += (v - mean) * (v - mean);
-  return Math.sqrt(sum / signature.length);
+/**
+ * The same grid as avatarSignature, read straight from the pixels.
+ *
+ * Worth having for small boxes, where filling an integral over the whole image
+ * to sample a few hundred pixels is far more work than reading them.
+ */
+function crop(
+  image: PixelSource,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): number[] {
+  const out: number[] = [];
+  for (let gy = 0; gy < AVATAR_GRID; gy++) {
+    for (let gx = 0; gx < AVATAR_GRID; gx++) {
+      const x0 = Math.max(0, Math.round(x + (w * gx) / AVATAR_GRID));
+      const x1 = Math.min(image.width, Math.round(x + (w * (gx + 1)) / AVATAR_GRID));
+      const y0 = Math.max(0, Math.round(y + (h * gy) / AVATAR_GRID));
+      const y1 = Math.min(image.height, Math.round(y + (h * (gy + 1)) / AVATAR_GRID));
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let n = 0;
+      for (let py = y0; py < y1; py++)
+        for (let px = x0; px < x1; px++) {
+          const i = (py * image.width + px) * 4;
+          r += image.data[i];
+          g += image.data[i + 1];
+          b += image.data[i + 2];
+          n++;
+        }
+      out.push(n ? r / n : 0, n ? g / n : 0, n ? b / n : 0);
+    }
+  }
+  return out;
 }
 
 /** Correlation, so a brightness difference between the two draws doesn't dominate. */
@@ -914,9 +939,14 @@ export function findHeroRow(
   rows: CardRegion[][],
   board?: BoardAnchor | null
 ): HeroMatch | null {
+  if (panelRows(rows, image.width).length === 0) return null;
+  // Built once and lent to both. It is a prefix sum over every pixel, which on
+  // a large screenshot is a hundred megabytes to fill; two of them was most of
+  // what a read spent its time on.
+  const integral = buildIntegral(image);
   return (
-    findHeroBySeatAvatar(image, rows) ??
-    (board ? findHeroBySeatOrder(image, rows, board) : null)
+    findHeroBySeatAvatar(image, rows, integral) ??
+    (board ? findHeroBySeatOrder(image, rows, board, integral) : null)
   );
 }
 
@@ -938,12 +968,10 @@ export function findHeroRow(
  */
 function findHeroBySeatAvatar(
   image: PixelSource,
-  rows: CardRegion[][]
+  rows: CardRegion[][],
+  integral: Integral
 ): HeroMatch | null {
   const candidates = panelRows(rows, image.width);
-  if (candidates.length === 0) return null;
-
-  const integral = buildIntegral(image);
   const centreX = image.width / 2;
   const step = Math.max(4, Math.round(image.height / 200));
 
@@ -1067,77 +1095,141 @@ function panelRowPitch(tops: number[], cardHeight: number): number {
 }
 
 /**
- * Best correlation between one avatar crop and a seat, over position and scale.
+ * A signature with its mean already taken out and its length measured.
+ *
+ * Correlating two signatures needs both centred and both scaled by their own
+ * spread. Every seat probe is compared against every panel row, so doing that
+ * work once per signature rather than once per comparison takes it off the
+ * inner loop entirely — and the length doubles as the contrast test, being the
+ * standard deviation up to a constant.
+ */
+interface Prepared {
+  centred: number[];
+  norm: number;
+}
+
+function prepare(signature: number[]): Prepared {
+  let mean = 0;
+  for (const v of signature) mean += v;
+  mean /= signature.length;
+
+  const centred = new Array<number>(signature.length);
+  let sum = 0;
+  for (let i = 0; i < signature.length; i++) {
+    const d = signature[i] - mean;
+    centred[i] = d;
+    sum += d * d;
+  }
+  return { centred, norm: Math.sqrt(sum) };
+}
+
+/** The same number `correlate` returns, off signatures already prepared. */
+function likeness(a: Prepared, b: Prepared): number {
+  if (!a.norm || !b.norm) return 0;
+  let sum = 0;
+  for (let i = 0; i < a.centred.length; i++) sum += a.centred[i] * b.centred[i];
+  return sum / (a.norm * b.norm);
+}
+
+/** The same number `contrast` returns. */
+function spread(p: Prepared): number {
+  return p.norm / Math.sqrt(p.centred.length);
+}
+
+interface SeatProbe extends Prepared {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+/**
+ * Every crop worth comparing against one seat.
  *
  * The seat avatar is drawn larger than the panel thumbnail, and larger again at
  * the user's own seat, which the client rings and enlarges — so scale is
- * searched rather than assumed, and that makes this the expensive part of
- * reading a screenshot. Searched coarsely first and then refined around
- * whatever that found: correlation over these signatures varies smoothly enough
- * that a coarse pass lands on the right hill, and it turns a two-second import
- * into a fifth of that.
+ * searched rather than assumed.
+ *
+ * These do not depend on which panel row is being looked for, which is the
+ * whole point of gathering them here: there are twenty-odd rows to try and the
+ * same twelve hundred crops answer all of them. Reading them per row instead
+ * was most of what the seat search cost.
  */
-function matchSeat(
+function seatProbes(
   integral: Integral,
   image: PixelSource,
-  avatar: number[],
   boxWidth: number,
   boxHeight: number,
   centreX: number,
   centreY: number,
   unit: number
-): number {
-  const sweep = (
-    fromScale: number,
-    toScale: number,
-    scaleStep: number,
-    x: number,
-    y: number,
-    reach: number,
-    step: number
-  ) => {
-    let best = { score: -1, scale: fromScale, x, y };
-    for (let scale = fromScale; scale <= toScale; scale += scaleStep) {
-      const w = boxWidth * scale;
-      const h = boxHeight * scale;
-      for (let dy = -reach; dy <= reach; dy += step) {
-        for (let dx = -reach; dx <= reach; dx += step) {
-          const left = x + dx - w / 2;
-          const top = y + dy - h / 2;
-          if (
-            left < 0 ||
-            top < 0 ||
-            left + w > image.width ||
-            top + h > image.height
-          )
-            continue;
-          const probe = avatarSignature(integral, left, top, w, h);
-          // Correlation divides by the variation it finds, so two nearly flat
-          // crops correlate at whatever their noise agrees on. An empty seat
-          // against a blank strip below the panel scored 0.96 that way.
-          if (contrast(probe) < SEAT_MIN_CONTRAST) continue;
-          const score = correlate(probe, avatar);
-          if (score > best.score)
-            best = { score, scale, x: x + dx, y: y + dy };
-        }
+): SeatProbe[] {
+  const probes: SeatProbe[] = [];
+  const reach = unit * SEAT_SEARCH_RADIUS;
+  const step = unit / 12;
+
+  for (let scale = 0.8; scale <= 2.25; scale += 0.15) {
+    const w = boxWidth * scale;
+    const h = boxHeight * scale;
+    for (let dy = -reach; dy <= reach; dy += step) {
+      for (let dx = -reach; dx <= reach; dx += step) {
+        const left = centreX + dx - w / 2;
+        const top = centreY + dy - h / 2;
+        if (left < 0 || top < 0 || left + w > image.width || top + h > image.height)
+          continue;
+        const probe = prepare(avatarSignature(integral, left, top, w, h));
+        // Correlation divides by the variation it finds, so two nearly flat
+        // crops correlate at whatever their noise agrees on. An empty seat
+        // against a blank strip below the panel scored 0.96 that way.
+        if (spread(probe) < SEAT_MIN_CONTRAST) continue;
+        probes.push({ ...probe, scale, x: centreX + dx, y: centreY + dy });
       }
     }
-    return best;
-  };
+  }
+  return probes;
+}
 
-  const reach = unit * SEAT_SEARCH_RADIUS;
-  const coarse = sweep(0.8, 2.25, 0.15, centreX, centreY, reach, unit / 12);
-  if (coarse.score < 0) return -1;
-  const fine = sweep(
-    Math.max(0.7, coarse.scale - 0.15),
-    coarse.scale + 0.15,
-    0.05,
-    coarse.x,
-    coarse.y,
-    unit / 12,
-    Math.max(2, Math.round(unit / 32))
-  );
-  return Math.max(coarse.score, fine.score);
+/**
+ * Look again, closely, around the crop that came nearest.
+ *
+ * Correlation over these signatures varies smoothly enough that the coarse
+ * sweep lands on the right hill; this finds the top of it. Kept separate from
+ * the sweep because where it looks depends on the row being matched, so unlike
+ * the sweep it cannot be shared between them.
+ */
+function refineSeat(
+  integral: Integral,
+  image: PixelSource,
+  avatar: Prepared,
+  boxWidth: number,
+  boxHeight: number,
+  from: SeatProbe,
+  unit: number
+): number {
+  let best = likeness(from, avatar);
+  const reach = unit / 12;
+  const step = Math.max(2, Math.round(unit / 32));
+
+  for (
+    let scale = Math.max(0.7, from.scale - 0.15);
+    scale <= from.scale + 0.15;
+    scale += 0.05
+  ) {
+    const w = boxWidth * scale;
+    const h = boxHeight * scale;
+    for (let dy = -reach; dy <= reach; dy += step) {
+      for (let dx = -reach; dx <= reach; dx += step) {
+        const left = from.x + dx - w / 2;
+        const top = from.y + dy - h / 2;
+        if (left < 0 || top < 0 || left + w > image.width || top + h > image.height)
+          continue;
+        const probe = prepare(avatarSignature(integral, left, top, w, h));
+        if (spread(probe) < SEAT_MIN_CONTRAST) continue;
+        const score = likeness(probe, avatar);
+        if (score > best) best = score;
+      }
+    }
+  }
+  return best;
 }
 
 /**
@@ -1173,10 +1265,11 @@ function matchSeat(
 function findHeroBySeatOrder(
   image: PixelSource,
   rows: CardRegion[][],
-  board: BoardAnchor
+  board: BoardAnchor,
+  integral: Integral
 ): HeroMatch | null {
   const candidates = panelRows(rows, image.width);
-  if (candidates.length === 0 || board.cards.length < 3) return null;
+  if (board.cards.length < 3) return null;
 
   const last = board.cards[board.cards.length - 1];
   const unit = board.unitY;
@@ -1192,39 +1285,63 @@ function findHeroBySeatOrder(
   const offset = reference.y - tops[0];
   const places = candidates.map((_, n) => Math.round((tops[n] - tops[0]) / pitch));
 
-  const integral = buildIntegral(image);
   const seatCount = SEAT_OFFSETS.length;
   const found: { place: number; seat: number; weight: number }[] = [];
 
   // Enough rows either side of the detected ones to cover a full panel wherever
-  // in it they happen to fall, plus slack for a panel scrolled part way.
+  // in it they happen to fall, plus slack for a panel scrolled part way. Rows
+  // stepped past the top of the panel land on its header and its buttons, and
+  // are left in — they match no seat, so they cost a comparison and nothing
+  // else.
+  const panel: { place: number; avatar: Prepared }[] = [];
   for (let place = -10; place <= 12; place++) {
     const y = tops[0] + place * pitch + offset;
     if (y < 0 || y + reference.h > image.height) continue;
-    const avatar = avatarSignature(
-      integral,
-      reference.x,
-      y,
-      reference.w,
-      reference.h
+    const avatar = prepare(
+      avatarSignature(integral, reference.x, y, reference.w, reference.h)
     );
-    if (contrast(avatar) < PANEL_MIN_CONTRAST) continue;
+    if (spread(avatar) < PANEL_MIN_CONTRAST) continue;
+    panel.push({ place, avatar });
+  }
+  if (panel.length === 0) return null;
 
-    for (let seat = 0; seat < seatCount; seat++) {
-      const score = matchSeat(
+  // Seat outermost, so each seat's crops are read once and every row is then
+  // scored against them for the price of a dot product.
+  for (let seat = 0; seat < seatCount; seat++) {
+    const probes = seatProbes(
+      integral,
+      image,
+      reference.w,
+      reference.h,
+      boardX + SEAT_OFFSETS[seat][0] * unit,
+      boardY + SEAT_OFFSETS[seat][1] * unit,
+      unit
+    );
+    if (probes.length === 0) continue;
+
+    for (const row of panel) {
+      let nearest = probes[0];
+      let best = likeness(nearest, row.avatar);
+      for (const probe of probes) {
+        const score = likeness(probe, row.avatar);
+        if (score > best) {
+          best = score;
+          nearest = probe;
+        }
+      }
+      const score = refineSeat(
         integral,
         image,
-        avatar,
+        row.avatar,
         reference.w,
         reference.h,
-        boardX + SEAT_OFFSETS[seat][0] * unit,
-        boardY + SEAT_OFFSETS[seat][1] * unit,
+        nearest,
         unit
       );
       // Weight by how far past the bar it got, so one clean recognition
       // outweighs several grudging ones.
       if (score >= SEAT_MIN_CORRELATION)
-        found.push({ place, seat, weight: score - SEAT_MIN_CORRELATION });
+        found.push({ place: row.place, seat, weight: score - SEAT_MIN_CORRELATION });
     }
   }
   if (found.length === 0) return null;
