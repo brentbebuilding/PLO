@@ -29,10 +29,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          # Without this the runner downloads every package from the registry
+          # on every push, which is the bulk of a deploy.
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         working-directory: ./frontend
-        run: npm install
+        # ci, not install: it installs exactly what the lockfile says and skips
+        # working out whether anything could be resolved differently.
+        run: npm ci
 
       - name: Build
         working-directory: ./frontend
