@@ -442,8 +442,69 @@ export function findHandRows(
   const chosen = inPanel.length > 0 ? inPanel : usable;
 
   const filled = image ? chosen.map(row => fillRowGaps(row, image)) : chosen;
-  return filled.map(squareUpRow).sort((a, b) => a[0].y - b[0].y);
+  // One integral for the whole check — it is a prefix sum over every pixel in
+  // the image, and building one per row was minutes of work to save seconds.
+  const integral = image ? buildIntegral(image) : null;
+  const faceUp = integral
+    ? filled.filter(row => !isFaceDown(row, integral))
+    : filled;
+  return faceUp.map(squareUpRow).sort((a, b) => a[0].y - b[0].y);
 }
+
+/**
+ * Whether a row is a player's cards drawn face down.
+ *
+ * A folded player still gets a row in the hands panel, holding four card backs.
+ * They are card-shaped, card-sized and a flat grey that reads as the same
+ * colour as a spade, so they arrive here as a perfectly ordinary hand — and the
+ * client's back is a chevron weave whose corner matched a five at 0.88, well
+ * past the bar for accepting a rank. Two of those rows came through as
+ * opponents holding 5s 5s 5s 5s.
+ *
+ * What gives them away is that the four are the same picture. Every card is
+ * compared against every other over the patch where a rank would be, and a row
+ * where all of them agree is not a hand — no hand holds four of one card. The
+ * comparison is deliberately of the rank's patch rather than the whole card:
+ * two faces sharing a suit share most of their area, and it is only at the rank
+ * that they are certain to differ.
+ *
+ * Suit is required to agree as well, which costs nothing on a back — all four
+ * are the same grey — and rules out the one real hand that could otherwise
+ * trip this, four of a kind in the hole, whose four cards are four suits.
+ */
+function isFaceDown(row: CardRegion[], integral: Integral): boolean {
+  // Two cards are not enough to argue from: a genuine pair sits at the top of
+  // this range, and a two-card row is a partial read of a real hand often
+  // enough to be worth keeping.
+  if (row.length < 3) return false;
+  if (!row.every(card => card.suit === row[0].suit)) return false;
+
+  const ranks = row.map(card => {
+    const box = rankGlyphBounds(card);
+    return box
+      ? avatarSignature(integral, box.x, box.y, box.width, box.height)
+      : null;
+  });
+
+  for (let a = 0; a < ranks.length; a++)
+    for (let b = a + 1; b < ranks.length; b++) {
+      const one = ranks[a];
+      const other = ranks[b];
+      if (!one || !other) return false;
+      if (correlate(one, other) < FACE_DOWN_MIN_LIKENESS) return false;
+    }
+  return true;
+}
+
+/**
+ * How alike two rank patches must be to be called the same picture.
+ *
+ * Measured across every screenshot to hand: real hands reach 0.58 at their most
+ * alike, four card backs sit at 0.77. The bar is set between them. It is not a
+ * wide gap, which is why agreeing on suit is required too — no real row that
+ * came close on likeness also agreed on suit.
+ */
+const FACE_DOWN_MIN_LIKENESS = 0.68;
 
 /**
  * Restore every card in a row to the row's own size.
@@ -740,6 +801,16 @@ function avatarSignature(
   return out;
 }
 
+/** How much a signature varies — flat crops are not worth correlating. */
+function contrast(signature: number[]): number {
+  let mean = 0;
+  for (const v of signature) mean += v;
+  mean /= signature.length;
+  let sum = 0;
+  for (const v of signature) sum += (v - mean) * (v - mean);
+  return Math.sqrt(sum / signature.length);
+}
+
 /** Correlation, so a brightness difference between the two draws doesn't dominate. */
 function correlate(a: number[], b: number[]): number {
   const n = a.length;
@@ -939,41 +1010,73 @@ const HERO_SEAT = 4;
  */
 const SEAT_MIN_CORRELATION = 0.85;
 
-/** How far the winning rotation must lead the runner-up to be acted on. */
-const ROTATION_MIN_MARGIN = 0.15;
+/** How far the winning reading must lead the runner-up to be acted on. */
+const ORDER_MIN_MARGIN = 0.06;
+
+/**
+ * Contrast a crop must carry before it is allowed to match anything.
+ *
+ * Correlation divides by the variation it finds, so two nearly flat crops
+ * correlate at whatever their noise happens to agree on — and an empty seat
+ * against a blank strip below the panel scored 0.96 that way, which is higher
+ * than most real recognitions manage. Both sides of every comparison have to
+ * carry structure. The panel is drawn dimmed and the table is not, so the two
+ * sides need different bars; both sit well below what a real avatar measures.
+ */
+const PANEL_MIN_CONTRAST = 8;
+const SEAT_MIN_CONTRAST = 22;
 
 /** How far either way a seat is searched, in board-card heights. */
 const SEAT_SEARCH_RADIUS = 0.45;
 
 /**
+ * A panel row's height, as a multiple of the cards it holds.
+ *
+ * Steady across every screenshot measured — 2.72, 2.70, 2.72 at three window
+ * sizes — because the client lays the panel out in proportion like everything
+ * else.
+ */
+const PANEL_ROW_PITCH = 2.72;
+
+/**
  * The vertical distance between hands-panel rows.
  *
- * Only rows holding cards are detected, so the gaps between them are multiples
- * of the pitch rather than the pitch itself: a panel of eight where three
- * players saw a showdown gives gaps of two, two and one row. The smallest gap
- * is therefore the best first guess, and every gap is then divided by it and
- * averaged, so a panel whose smallest gap happens to be two rows still lands on
- * the right pitch rather than double it.
+ * Only some rows are detected — a player who folded holds card backs, which are
+ * thrown out before this — so the gaps between the rows that remain are
+ * multiples of the pitch rather than the pitch itself. A panel of eight where
+ * three players saw a showdown gives gaps of two, two and one row.
+ *
+ * The card height gives the first guess. Taking the smallest gap instead is the
+ * obvious move and it is wrong in exactly the case that matters: a screenshot
+ * with two rows two apart has one gap, and reading it as one row doubles the
+ * pitch and puts every stepped-out row between the real ones. The guess only
+ * has to be close enough to divide each gap into the right number of rows,
+ * which it comfortably is; the gaps then set the pitch precisely.
  */
-function panelRowPitch(tops: number[], fallback: number): number {
-  let pitch = Infinity;
-  for (let i = 1; i < tops.length; i++)
-    pitch = Math.min(pitch, tops[i] - tops[i - 1]);
-  if (!Number.isFinite(pitch) || pitch <= 0) return fallback;
-
+function panelRowPitch(tops: number[], cardHeight: number): number {
+  const seed = cardHeight * PANEL_ROW_PITCH;
   let total = 0;
   let count = 0;
   for (let i = 1; i < tops.length; i++) {
-    const rowsApart = Math.round((tops[i] - tops[i - 1]) / pitch);
-    if (rowsApart >= 1) {
-      total += (tops[i] - tops[i - 1]) / rowsApart;
-      count++;
-    }
+    const gap = tops[i] - tops[i - 1];
+    const rowsApart = Math.max(1, Math.round(gap / seed));
+    total += gap / rowsApart;
+    count++;
   }
-  return count ? total / count : pitch;
+  return count ? total / count : seed;
 }
 
-/** Best correlation between one avatar crop and a seat, over position and scale. */
+/**
+ * Best correlation between one avatar crop and a seat, over position and scale.
+ *
+ * The seat avatar is drawn larger than the panel thumbnail, and larger again at
+ * the user's own seat, which the client rings and enlarges — so scale is
+ * searched rather than assumed, and that makes this the expensive part of
+ * reading a screenshot. Searched coarsely first and then refined around
+ * whatever that found: correlation over these signatures varies smoothly enough
+ * that a coarse pass lands on the right hill, and it turns a two-second import
+ * into a fifth of that.
+ */
 function matchSeat(
   integral: Integral,
   image: PixelSource,
@@ -984,50 +1087,88 @@ function matchSeat(
   centreY: number,
   unit: number
 ): number {
-  const step = Math.max(2, Math.round(unit / 20));
-  const radius = unit * SEAT_SEARCH_RADIUS;
-  let best = -1;
-
-  // The seat avatar is drawn larger than the panel thumbnail, and larger again
-  // at the user's own seat, which the client rings and enlarges. Scale is
-  // searched rather than assumed.
-  for (let scale = 0.8; scale <= 2.25; scale += 0.07) {
-    const w = boxWidth * scale;
-    const h = boxHeight * scale;
-    for (let dy = -radius; dy <= radius; dy += step) {
-      for (let dx = -radius; dx <= radius; dx += step) {
-        const x = centreX + dx - w / 2;
-        const y = centreY + dy - h / 2;
-        if (x < 0 || y < 0 || x + w > image.width || y + h > image.height)
-          continue;
-        const c = correlate(avatarSignature(integral, x, y, w, h), avatar);
-        if (c > best) best = c;
+  const sweep = (
+    fromScale: number,
+    toScale: number,
+    scaleStep: number,
+    x: number,
+    y: number,
+    reach: number,
+    step: number
+  ) => {
+    let best = { score: -1, scale: fromScale, x, y };
+    for (let scale = fromScale; scale <= toScale; scale += scaleStep) {
+      const w = boxWidth * scale;
+      const h = boxHeight * scale;
+      for (let dy = -reach; dy <= reach; dy += step) {
+        for (let dx = -reach; dx <= reach; dx += step) {
+          const left = x + dx - w / 2;
+          const top = y + dy - h / 2;
+          if (
+            left < 0 ||
+            top < 0 ||
+            left + w > image.width ||
+            top + h > image.height
+          )
+            continue;
+          const probe = avatarSignature(integral, left, top, w, h);
+          // Correlation divides by the variation it finds, so two nearly flat
+          // crops correlate at whatever their noise agrees on. An empty seat
+          // against a blank strip below the panel scored 0.96 that way.
+          if (contrast(probe) < SEAT_MIN_CONTRAST) continue;
+          const score = correlate(probe, avatar);
+          if (score > best.score)
+            best = { score, scale, x: x + dx, y: y + dy };
+        }
       }
     }
-  }
-  return best;
+    return best;
+  };
+
+  const reach = unit * SEAT_SEARCH_RADIUS;
+  const coarse = sweep(0.8, 2.25, 0.15, centreX, centreY, reach, unit / 12);
+  if (coarse.score < 0) return -1;
+  const fine = sweep(
+    Math.max(0.7, coarse.scale - 0.15),
+    coarse.scale + 0.15,
+    0.05,
+    coarse.x,
+    coarse.y,
+    unit / 12,
+    Math.max(2, Math.round(unit / 32))
+  );
+  return Math.max(coarse.score, fine.score);
 }
 
 /**
  * Find the user by working out how the hands panel maps onto the table.
  *
  * The panel lists players in seating order — going clockwise round the felt
- * from whoever happens to be listed first. That ordering is the whole trick: it
- * means the panel and the table differ by a single unknown, the rotation, and
- * recognising *any one* player at *any one* seat pins it down. The user's seat
- * is known, so once the rotation is known so is their row.
+ * from whoever happens to be listed first. That ordering is the whole trick:
+ * recognising *any one* player at *any one* seat pins down where the whole list
+ * sits on the table, and the user's seat is known, so their row follows.
  *
- * So every panel row's avatar is matched against all eight seats, and each
- * confident match votes for the rotation it implies. A hand worth reviewing is
- * one where the interesting players are all-in and their seat avatars are
- * covered — but the players who folded are not covered, and they are in the
- * panel too. It is their rows that carry the vote.
+ * So every panel row's avatar is matched against all eight seats. A hand worth
+ * reviewing is one where the interesting players are all-in and their seat
+ * avatars are covered by the client's yellow disc — but the players who folded
+ * are not covered, and they are in the panel too. It is their rows that carry
+ * the answer.
  *
  * Rows are stepped out by pitch rather than taken from the detected set,
  * because a folded player's row holds no cards and so is never detected. Those
  * rows are exactly the ones most likely to be legible at the seat. Stepping
  * past the top of the panel lands on the header and its buttons; those crops
- * match no seat at all, so they simply fail to vote and need no special case.
+ * match no seat at all, so they simply fail to match and need no special case.
+ *
+ * Which seats are *taken* is solved for rather than assumed. Nothing says a
+ * table is full — one six-handed screenshot left the top and upper-right seats
+ * empty — and the panel skips empty seats, so the step from one row to the next
+ * is not a fixed turn round the felt. Every possible set of occupied seats is
+ * tried instead, which is cheap: eight seats is 256 sets, and only those
+ * holding the user's own seat and at least as many players as there are rows in
+ * the panel are worth scoring. The recognitions pick the set out. Three rows
+ * matching seats that run left, upper-left, then jumping to right can only be
+ * explained by the two seats in between being empty.
  */
 function findHeroBySeatOrder(
   image: PixelSource,
@@ -1044,16 +1185,21 @@ function findHeroBySeatOrder(
 
   const tops = candidates.map(i => rows[i][0].y);
   const reference = panelAvatarBox(rows[candidates[0]]);
-  const pitch = panelRowPitch(tops, rows[candidates[0]][0].height * 2.7);
+  const pitch = panelRowPitch(
+    tops,
+    median(candidates.map(i => rows[i][0].height))
+  );
   const offset = reference.y - tops[0];
+  const places = candidates.map((_, n) => Math.round((tops[n] - tops[0]) / pitch));
 
   const integral = buildIntegral(image);
-  const votes = new Array<number>(SEAT_OFFSETS.length).fill(0);
+  const seatCount = SEAT_OFFSETS.length;
+  const found: { place: number; seat: number; weight: number }[] = [];
 
   // Enough rows either side of the detected ones to cover a full panel wherever
   // in it they happen to fall, plus slack for a panel scrolled part way.
-  for (let k = -10; k <= 12; k++) {
-    const y = tops[0] + k * pitch + offset;
+  for (let place = -10; place <= 12; place++) {
+    const y = tops[0] + place * pitch + offset;
     if (y < 0 || y + reference.h > image.height) continue;
     const avatar = avatarSignature(
       integral,
@@ -1062,8 +1208,9 @@ function findHeroBySeatOrder(
       reference.w,
       reference.h
     );
+    if (contrast(avatar) < PANEL_MIN_CONTRAST) continue;
 
-    for (let seat = 0; seat < SEAT_OFFSETS.length; seat++) {
+    for (let seat = 0; seat < seatCount; seat++) {
       const score = matchSeat(
         integral,
         image,
@@ -1074,37 +1221,71 @@ function findHeroBySeatOrder(
         boardY + SEAT_OFFSETS[seat][1] * unit,
         unit
       );
-      if (score < SEAT_MIN_CORRELATION) continue;
-      // Row k sitting at this seat means the panel is turned by this much.
-      const rotation =
-        (((seat - k) % SEAT_OFFSETS.length) + SEAT_OFFSETS.length) %
-        SEAT_OFFSETS.length;
       // Weight by how far past the bar it got, so one clean recognition
       // outweighs several grudging ones.
-      votes[rotation] += score - SEAT_MIN_CORRELATION;
+      if (score >= SEAT_MIN_CORRELATION)
+        found.push({ place, seat, weight: score - SEAT_MIN_CORRELATION });
+    }
+  }
+  if (found.length === 0) return null;
+
+  // The panel cannot hold fewer players than it has rows, and its rows are all
+  // different players, so the run of rows detected bounds the table's size from
+  // below. That alone rules out most of the 256 sets.
+  const span = Math.max(...places) - Math.min(...places) + 1;
+  const least = Math.max(2, span, candidates.length);
+
+  // Score each reading of the table by the recognitions it explains, and keep
+  // the best score for each row it concludes is the user's. Competing readings
+  // that reach the same row are the same answer, so the strongest stands for
+  // all of them.
+  const everything = found.reduce((sum, hit) => sum + hit.weight, 0);
+  const byRow = new Map<number, number>();
+  for (let taken = 0; taken < 1 << seatCount; taken++) {
+    if (!(taken & (1 << HERO_SEAT))) continue;
+    const seats: number[] = [];
+    for (let seat = 0; seat < seatCount; seat++)
+      if (taken & (1 << seat)) seats.push(seat);
+    if (seats.length < least) continue;
+
+    const size = seats.length;
+    const heroAt = seats.indexOf(HERO_SEAT);
+    for (let turn = 0; turn < size; turn++) {
+      let explained = 0;
+      for (const hit of found)
+        if (seats[(((hit.place + turn) % size) + size) % size] === hit.seat)
+          explained += hit.weight;
+      if (explained <= 0) continue;
+      // Charged for the recognitions it cannot account for as well as credited
+      // for the ones it can. Without that a reading that explains three of five
+      // scores barely below one that explains all five, and two avatars on a
+      // table are alike often enough that the difference decides it.
+      const total = explained - (everything - explained);
+
+      // The row that lands on the user's seat. Rows repeat every full turn of
+      // the table, but the detected rows span less than one turn, so at most
+      // one of them can be it.
+      const heroPlace = (((heroAt - turn) % size) + size) % size;
+      const row = candidates.findIndex(
+        (_, n) => (((places[n] % size) + size) % size) === heroPlace
+      );
+      // No such row is a real answer, not a failure: the user folded and the
+      // client is showing only the hands that reached a showdown. It is scored
+      // alongside the rest so that it can win, rather than being passed over in
+      // favour of a worse reading that does name a row.
+      const key = row < 0 ? -1 : candidates[row];
+      byRow.set(key, Math.max(byRow.get(key) ?? 0, total));
     }
   }
 
-  const ranked = votes
-    .map((total, rotation) => ({ total, rotation }))
-    .sort((a, b) => b.total - a.total);
-  if (ranked[0].total <= 0) return null;
-  if (ranked[0].total - ranked[1].total < ROTATION_MIN_MARGIN) return null;
+  const ranked = [...byRow.entries()].sort((a, b) => b[1] - a[1]);
+  if (ranked.length === 0 || ranked[0][1] <= 0) return null;
+  const runnerUp = ranked.length > 1 ? ranked[1][1] : 0;
+  if (ranked[0][1] - runnerUp < ORDER_MIN_MARGIN) return null;
+  if (ranked[0][0] < 0) return null;
 
-  // Which panel row lands on the user's seat under that rotation.
-  const heroStep =
-    (((HERO_SEAT - ranked[0].rotation) % SEAT_OFFSETS.length) +
-      SEAT_OFFSETS.length) %
-    SEAT_OFFSETS.length;
-  const hero = candidates.find(i => {
-    const k = Math.round((rows[i][0].y - tops[0]) / pitch);
-    return ((k % SEAT_OFFSETS.length) + SEAT_OFFSETS.length) %
-      SEAT_OFFSETS.length === heroStep;
-  });
-
-  // No such row is a real answer, not a failure: the user folded and the client
-  // is showing only the hands that reached a showdown.
-  return hero === undefined
-    ? null
-    : { row: hero, correlation: ranked[0].total + SEAT_MIN_CORRELATION };
+  return {
+    row: ranked[0][0],
+    correlation: ranked[0][1] + SEAT_MIN_CORRELATION,
+  };
 }
