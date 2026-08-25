@@ -733,28 +733,50 @@ export function rankGlyphBounds(card: {
 interface Integral {
   width: number;
   height: number;
-  sums: Float64Array;
+  sums: Uint32Array | Float64Array;
 }
 
 function buildIntegral(image: PixelSource): Integral {
   const { width: W, height: H, data } = image;
   const stride = (W + 1) * 3;
-  const sums = new Float64Array((W + 1) * (H + 1) * 3);
 
+  /*
+   * Whole numbers, in half the memory.
+   *
+   * A running sum reaches 255 x width x height — about 1.2 billion on the
+   * largest screenshot here, which a 32-bit unsigned integer holds with room to
+   * spare, and it is exact where a 32-bit float would not be. That is 54MB
+   * rather than 107MB to allocate and fill, and filling it was the single
+   * largest cost of finding the user's seat.
+   *
+   * Past about sixteen megapixels the sums no longer fit and doubles are used
+   * instead. No screenshot of a poker table is anywhere near that, but the
+   * failure would be silent wraparound, which is not a thing to leave to luck.
+   */
+  const cells = (W + 1) * (H + 1) * 3;
+  const sums =
+    255 * W * H <= 4294967295 ? new Uint32Array(cells) : new Float64Array(cells);
+
+  // Offsets are carried forward rather than multiplied out per pixel: this
+  // runs once for every pixel in the image and the two index calculations were
+  // a third of the work in it.
   for (let y = 0; y < H; y++) {
     let rowR = 0;
     let rowG = 0;
     let rowB = 0;
+    let read = y * W * 4;
+    let here = (y + 1) * stride + 3;
+    let above = y * stride + 3;
     for (let x = 0; x < W; x++) {
-      const i = (y * W + x) * 4;
-      rowR += data[i];
-      rowG += data[i + 1];
-      rowB += data[i + 2];
-      const here = (y + 1) * stride + (x + 1) * 3;
-      const above = y * stride + (x + 1) * 3;
+      rowR += data[read];
+      rowG += data[read + 1];
+      rowB += data[read + 2];
       sums[here] = sums[above] + rowR;
       sums[here + 1] = sums[above + 1] + rowG;
       sums[here + 2] = sums[above + 2] + rowB;
+      read += 4;
+      here += 3;
+      above += 3;
     }
   }
   return { width: W, height: H, sums };
@@ -1343,9 +1365,9 @@ function findHeroFromSeats(
   }
   if (panel.length === 0) return null;
 
-  /** Every panel row scored against one seat, the crops read once for all. */
-  const scoreSeat = (seat: number) => {
-    const probes = seatProbes(
+  /** Every crop worth comparing against one seat, read once for all rows. */
+  const probesFor = (seat: number) =>
+    seatProbes(
       integral,
       image,
       reference.w,
@@ -1355,7 +1377,10 @@ function findHeroFromSeats(
       unit,
       seat === HERO_SEAT ? HERO_SEARCH_RADIUS : SEAT_SEARCH_RADIUS
     );
-    return panel.map(row => {
+
+  /** How well each of these rows matches the seat those crops came from. */
+  const scoreAgainst = (probes: SeatProbe[], against: typeof panel) =>
+    against.map(row => {
       if (probes.length === 0) return 0;
       let nearest = probes[0];
       let best = likeness(nearest, row.avatar);
@@ -1376,7 +1401,6 @@ function findHeroFromSeats(
         unit
       );
     });
-  };
 
   /** The detected row a stepped-out place belongs to, or -1 if it holds no cards. */
   const rowAt = (place: number) => {
@@ -1384,53 +1408,55 @@ function findHeroFromSeats(
     return at < 0 ? -1 : candidates[at];
   };
 
+  // Rows holding cards, and the rest — stepped out by pitch to cover the
+  // players who folded, and past them the panel's own header and buttons.
+  const holdingCards = panel.filter(row => rowAt(row.place) >= 0);
+  const empty = panel.filter(row => rowAt(row.place) < 0);
+
   // The user's own seat first, and on most screenshots that is the end of it:
   // their avatar is drawn there plainly, and a row that matches it is theirs
-  // with nothing further to work out. Seven seats of crops are not read at all
-  // in that case.
-  const atHeroSeat = scoreSeat(HERO_SEAT);
+  // with nothing further to work out. Seven seats of crops are never read.
+  //
+  // Only rows holding cards are tried, which is what makes this cheap — there
+  // are a handful of those against a couple of dozen stepped-out places, and a
+  // row without cards could not be the answer even if it matched. Those rows
+  // still get a vote below, where a reading as a whole can outweigh them; that
+  // matters because the header crops reach 0.88 against a seat.
+  const heroProbes = probesFor(HERO_SEAT);
+  const atHeroSeat = scoreAgainst(heroProbes, holdingCards);
 
-  // Only rows that hold cards can win it outright. The rows stepped out past
-  // the top of the panel land on its header and its buttons, and those crops
-  // reach 0.88 against a seat often enough to matter — they are worth a vote
-  // below, where the reading as a whole can outweigh them, but not the last
-  // word. A row without cards is no answer anyway.
   let clearest = -1;
-  panel.forEach((row, i) => {
-    if (rowAt(row.place) < 0) return;
+  for (let i = 0; i < atHeroSeat.length; i++)
     if (clearest < 0 || atHeroSeat[i] > atHeroSeat[clearest]) clearest = i;
-  });
 
   if (clearest >= 0 && atHeroSeat[clearest] >= HERO_MIN_CORRELATION)
     return {
-      row: rowAt(panel[clearest].place),
+      row: rowAt(holdingCards[clearest].place),
       correlation: atHeroSeat[clearest],
     };
 
   // Otherwise their avatar is covered — the client stamps an ALL-IN disc over
   // it, on exactly the hands worth reviewing — and the answer has to come from
   // where everyone else is sitting.
-  atHeroSeat.forEach((score, i) => {
-    if (score >= SEAT_MIN_CORRELATION)
-      found.push({
-        place: panel[i].place,
-        seat: HERO_SEAT,
-        weight: score - SEAT_MIN_CORRELATION,
-      });
-  });
-
-  for (let seat = 0; seat < seatCount; seat++) {
-    if (seat === HERO_SEAT) continue;
-    scoreSeat(seat).forEach((score, i) => {
+  const vote = (rows: typeof panel, scores: number[], seat: number) =>
+    scores.forEach((score, i) => {
       // Weight by how far past the bar it got, so one clean recognition
       // outweighs several grudging ones.
       if (score >= SEAT_MIN_CORRELATION)
         found.push({
-          place: panel[i].place,
+          place: rows[i].place,
           seat,
           weight: score - SEAT_MIN_CORRELATION,
         });
     });
+
+  vote(holdingCards, atHeroSeat, HERO_SEAT);
+  vote(empty, scoreAgainst(heroProbes, empty), HERO_SEAT);
+
+  for (let seat = 0; seat < seatCount; seat++) {
+    if (seat === HERO_SEAT) continue;
+    const probes = probesFor(seat);
+    vote(panel, scoreAgainst(probes, panel), seat);
   }
   if (found.length === 0) return null;
 
