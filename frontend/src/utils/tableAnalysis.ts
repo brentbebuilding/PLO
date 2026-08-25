@@ -940,20 +940,23 @@ export function findHeroRow(
   board?: BoardAnchor | null
 ): HeroMatch | null {
   if (panelRows(rows, image.width).length === 0) return null;
-  // Built once and lent to both. It is a prefix sum over every pixel, which on
-  // a large screenshot is a hundred megabytes to fill; two of them was most of
-  // what a read spent its time on.
+  // A prefix sum over every pixel, which on a large screenshot is a hundred
+  // megabytes to fill. One, shared by everything below.
   const integral = buildIntegral(image);
-  return (
-    findHeroBySeatAvatar(image, rows, integral) ??
-    (board ? findHeroBySeatOrder(image, rows, board, integral) : null)
-  );
+  return board && board.cards.length >= 3
+    ? findHeroFromSeats(image, rows, board, integral)
+    : findHeroBySweep(image, rows, integral);
 }
 
 /**
- * Find the user by looking for their avatar at their own seat.
+ * Find the user by hunting for their avatar across the bottom of the table.
  *
- * Their cards there are useless for this: once they fold, the client greys them
+ * Only for a screenshot with no board on it, where there is no frame to measure
+ * the seat against and so nothing to do but search. Everything else goes
+ * through findHeroFromSeats, which knows where to look and is an order of
+ * magnitude cheaper for it.
+ *
+ * Their cards at the seat are useless for this: once they fold, the client greys them
  * until neither suit nor rank survives — one folded hand measured as a single
  * uniform blob with no rank ink anywhere in it.
  *
@@ -966,7 +969,7 @@ export function findHeroRow(
  * A single panel row is still matched rather than assumed to be the user's: the
  * client will happily show one opponent's hand and none of the user's.
  */
-function findHeroBySeatAvatar(
+function findHeroBySweep(
   image: PixelSource,
   rows: CardRegion[][],
   integral: Integral
@@ -1056,6 +1059,17 @@ const SEAT_MIN_CONTRAST = 22;
 
 /** How far either way a seat is searched, in board-card heights. */
 const SEAT_SEARCH_RADIUS = 0.45;
+
+/**
+ * And how far for the user's own seat, which needs more room.
+ *
+ * The eight seats sit where the client's plan puts them, to within a tenth of a
+ * card — but the user's own avatar is drawn against their name plate and their
+ * cards, and shifts with them: measured across screenshots it lands anywhere
+ * from a tenth to two thirds of a card off the nominal centre. At 0.45 one
+ * screenshot's hero scored 0.49 against their own unobscured face.
+ */
+const HERO_SEARCH_RADIUS = 0.9;
 
 /**
  * A panel row's height, as a multiple of the cards it holds.
@@ -1161,10 +1175,11 @@ function seatProbes(
   boxHeight: number,
   centreX: number,
   centreY: number,
-  unit: number
+  unit: number,
+  radius: number
 ): SeatProbe[] {
   const probes: SeatProbe[] = [];
-  const reach = unit * SEAT_SEARCH_RADIUS;
+  const reach = unit * radius;
   const step = unit / 12;
 
   for (let scale = 0.8; scale <= 2.25; scale += 0.15) {
@@ -1262,7 +1277,7 @@ function refineSeat(
  * matching seats that run left, upper-left, then jumping to right can only be
  * explained by the two seats in between being empty.
  */
-function findHeroBySeatOrder(
+function findHeroFromSeats(
   image: PixelSource,
   rows: CardRegion[][],
   board: BoardAnchor,
@@ -1305,9 +1320,8 @@ function findHeroBySeatOrder(
   }
   if (panel.length === 0) return null;
 
-  // Seat outermost, so each seat's crops are read once and every row is then
-  // scored against them for the price of a dot product.
-  for (let seat = 0; seat < seatCount; seat++) {
+  /** Every panel row scored against one seat, the crops read once for all. */
+  const scoreSeat = (seat: number) => {
     const probes = seatProbes(
       integral,
       image,
@@ -1315,11 +1329,11 @@ function findHeroBySeatOrder(
       reference.h,
       boardX + SEAT_OFFSETS[seat][0] * unit,
       boardY + SEAT_OFFSETS[seat][1] * unit,
-      unit
+      unit,
+      seat === HERO_SEAT ? HERO_SEARCH_RADIUS : SEAT_SEARCH_RADIUS
     );
-    if (probes.length === 0) continue;
-
-    for (const row of panel) {
+    return panel.map(row => {
+      if (probes.length === 0) return 0;
       let nearest = probes[0];
       let best = likeness(nearest, row.avatar);
       for (const probe of probes) {
@@ -1329,7 +1343,7 @@ function findHeroBySeatOrder(
           nearest = probe;
         }
       }
-      const score = refineSeat(
+      return refineSeat(
         integral,
         image,
         row.avatar,
@@ -1338,11 +1352,62 @@ function findHeroBySeatOrder(
         nearest,
         unit
       );
+    });
+  };
+
+  /** The detected row a stepped-out place belongs to, or -1 if it holds no cards. */
+  const rowAt = (place: number) => {
+    const at = places.indexOf(place);
+    return at < 0 ? -1 : candidates[at];
+  };
+
+  // The user's own seat first, and on most screenshots that is the end of it:
+  // their avatar is drawn there plainly, and a row that matches it is theirs
+  // with nothing further to work out. Seven seats of crops are not read at all
+  // in that case.
+  const atHeroSeat = scoreSeat(HERO_SEAT);
+
+  // Only rows that hold cards can win it outright. The rows stepped out past
+  // the top of the panel land on its header and its buttons, and those crops
+  // reach 0.88 against a seat often enough to matter — they are worth a vote
+  // below, where the reading as a whole can outweigh them, but not the last
+  // word. A row without cards is no answer anyway.
+  let clearest = -1;
+  panel.forEach((row, i) => {
+    if (rowAt(row.place) < 0) return;
+    if (clearest < 0 || atHeroSeat[i] > atHeroSeat[clearest]) clearest = i;
+  });
+
+  if (clearest >= 0 && atHeroSeat[clearest] >= HERO_MIN_CORRELATION)
+    return {
+      row: rowAt(panel[clearest].place),
+      correlation: atHeroSeat[clearest],
+    };
+
+  // Otherwise their avatar is covered — the client stamps an ALL-IN disc over
+  // it, on exactly the hands worth reviewing — and the answer has to come from
+  // where everyone else is sitting.
+  atHeroSeat.forEach((score, i) => {
+    if (score >= SEAT_MIN_CORRELATION)
+      found.push({
+        place: panel[i].place,
+        seat: HERO_SEAT,
+        weight: score - SEAT_MIN_CORRELATION,
+      });
+  });
+
+  for (let seat = 0; seat < seatCount; seat++) {
+    if (seat === HERO_SEAT) continue;
+    scoreSeat(seat).forEach((score, i) => {
       // Weight by how far past the bar it got, so one clean recognition
       // outweighs several grudging ones.
       if (score >= SEAT_MIN_CORRELATION)
-        found.push({ place: row.place, seat, weight: score - SEAT_MIN_CORRELATION });
-    }
+        found.push({
+          place: panel[i].place,
+          seat,
+          weight: score - SEAT_MIN_CORRELATION,
+        });
+    });
   }
   if (found.length === 0) return null;
 
