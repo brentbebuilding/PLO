@@ -23,6 +23,31 @@ reviewed after the fact.
 
 Cheap, and independent of everything else.
 
+## Collect screenshots that read wrongly
+
+Every misread so far has been fixed by someone sending the picture over. A way
+for anyone to hand one in would keep that going without it having to come
+through me. Three routes, none of them a page that writes to the repo directly
+— that needs a write token in the page's JavaScript, where anyone can read it
+and GitHub's secret scanning will revoke it anyway:
+
+- **A prefilled GitHub issue.** A button opens a new issue on the repo; they
+  drag the screenshot into the body and GitHub hosts it. Nothing to build, no
+  secret, no abuse surface. Costs the submitter a free GitHub account, and the
+  issue is public.
+- **A small relay** — a Cloudflare Worker on the free tier holding the token
+  server-side and committing into `submissions/`. No account needed from them,
+  files land exactly where wanted, but it is a service to keep alive and it
+  needs a size cap and a rate limit or the repo fills with junk.
+- **A form service** (Tally, Formspree). No account, no code, but the images
+  sit with a third party and free tiers are tight on attachment size.
+
+Whichever route: the app could prefill the report with what the reader actually
+detected, the version and the image size, so the misread arrives next to the
+picture. And screenshots carry live player handles — public and permanent by
+the issue route — which is worth saying on the form, given every handle on the
+help page's example is pixelated for exactly that reason.
+
 ## Equity against a range
 
 "How does this hand do against any two broadway cards" rather than against one
