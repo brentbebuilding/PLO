@@ -52,4 +52,20 @@ export const SUIT_COLORS: Record<Suit, string> = {
   c: '#177a3f',
 };
 
+/**
+ * The same four suits, for drawing on the app's own dark ground rather than on
+ * a card.
+ *
+ * A card face supplies its own light background, so the pip on it can be as
+ * dark as it likes — spades are all but black. Written straight onto the felt
+ * surround that same black is invisible, so each suit is lifted to something
+ * that reads there while staying recognisably the same colour.
+ */
+export const SUIT_INK: Record<Suit, string> = {
+  s: '#d6dae0',
+  h: '#f0616c',
+  d: '#5a9bff',
+  c: '#3fc470',
+};
+
 export default SUIT_PIPS;

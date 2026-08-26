@@ -428,3 +428,127 @@ export function calculateEquity(
     players,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Outs
+// ---------------------------------------------------------------------------
+
+export interface Outs {
+  /** The street still to come. */
+  street: 'turn' | 'river';
+  /** The cards that qualify, in deck order. */
+  cards: Card[];
+  /** River cards that split the pot rather than win it. Empty on the turn. */
+  ties: Card[];
+  /** How many cards could come at all. */
+  total: number;
+}
+
+/** Every card that could still be dealt, given what is already accounted for. */
+function remainingDeck(accountedFor: Card[]): number[] {
+  const seen = new Set(accountedFor.map(cardToString));
+  const deck: number[] = [];
+  for (const rank of RANKS)
+    for (const suit of SUITS)
+      if (!seen.has(`${rank}${suit}`)) deck.push(encode({ rank, suit }));
+  return deck;
+}
+
+function decode(card: number): Card {
+  return { rank: RANKS[Math.floor(card / 4)], suit: SUITS[card % 4] };
+}
+
+/** Every three-card subset of a five-card board, as index triples. */
+const BOARD_TRIPLES: [number, number, number][] = [];
+for (let a = 0; a < 5; a++)
+  for (let b = a + 1; b < 5; b++)
+    for (let c = b + 1; c < 5; c++) BOARD_TRIPLES.push([a, b, c]);
+
+/** The best five-card hand a player can make, using exactly two of their four. */
+function bestHand(hole: number[], board: number[]): number {
+  let best = -1;
+  for (const [i, j, k] of BOARD_TRIPLES) {
+    const x = board[i];
+    const y = board[j];
+    const z = board[k];
+    for (let h = 0; h < 6; h++) {
+      const v = evaluate5(hole[HOLE_PAIRS[h][0]], hole[HOLE_PAIRS[h][1]], x, y, z);
+      if (v > best) best = v;
+    }
+  }
+  return best;
+}
+
+/**
+ * Which cards the user still wants to see.
+ *
+ * On the turn that is the ordinary question — the river cards that win it, and
+ * separately the ones that split the pot, since a chop is not an out but it is
+ * not a loss either.
+ *
+ * On the flop it is asked one street earlier: the turn cards after which the
+ * user is favourite, meaning their equity over the remaining rivers is higher
+ * than anyone else's. Heads-up that is the same as being above half; multiway
+ * it is not, and being ahead of the field is what "favourite" means.
+ *
+ * Null when there is nothing to ask: before the flop, where every card is
+ * still to come and naming them says nothing, and on the river, where the hand
+ * is already decided.
+ */
+export function findOuts(
+  playerHands: Card[][],
+  board: Card[],
+  dead: Card[],
+  hero: number
+): Outs | null {
+  if (board.length !== 3 && board.length !== 4) return null;
+  if (playerHands.length < 2) return null;
+  if (hero < 0 || hero >= playerHands.length) return null;
+  if (playerHands.some(hand => hand.length !== 4)) return null;
+
+  const holes = playerHands.map(hand => hand.map(encode));
+  const known = board.map(encode);
+  const deck = remainingDeck([...playerHands.flat(), ...board, ...dead]);
+
+  const cards: Card[] = [];
+  const ties: Card[] = [];
+
+  if (board.length === 4) {
+    for (const card of deck) {
+      const complete = [...known, card];
+      const scores = holes.map(hole => bestHand(hole, complete));
+      const best = Math.max(...scores);
+      if (scores[hero] < best) continue;
+      // A hand that ties for best splits the pot; only a hand alone at the top
+      // has actually won, so the two are counted apart.
+      (scores.filter(s => s === best).length > 1 ? ties : cards).push(decode(card));
+    }
+    return { street: 'river', cards, ties, total: deck.length };
+  }
+
+  // Flop. Each turn card is judged by how the hand then stands over every
+  // river that could follow it.
+  for (let t = 0; t < deck.length; t++) {
+    const turn = deck[t];
+    const equity = new Array<number>(holes.length).fill(0);
+    let boards = 0;
+
+    for (let r = 0; r < deck.length; r++) {
+      if (r === t) continue;
+      const complete = [...known, turn, deck[r]];
+      const scores = holes.map(hole => bestHand(hole, complete));
+      const best = Math.max(...scores);
+      const winners = scores.filter(s => s === best).length;
+      for (let p = 0; p < holes.length; p++)
+        if (scores[p] === best) equity[p] += 1 / winners;
+      boards++;
+    }
+    if (boards === 0) continue;
+
+    const mine = equity[hero];
+    if (equity.every((share, p) => p === hero || share < mine))
+      cards.push(decode(turn));
+  }
+
+  return { street: 'turn', cards, ties, total: deck.length };
+}

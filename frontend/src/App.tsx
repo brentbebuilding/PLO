@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card } from './types';
-import { calculateEquity, SimulationResult } from './utils/equity';
+import { calculateEquity, findOuts, Outs, SimulationResult } from './utils/equity';
+import { SUIT_SYMBOLS } from './utils/cards';
+import { SUIT_INK } from './assets/cardPips';
 import { detectCards } from './utils/cardDetection';
 import { loadSlots, loadSuitSamples, loadTemplates } from './utils/glyphTemplates';
 import CardRail from './components/CardRail';
@@ -24,7 +26,28 @@ import {
   remember,
   RecentHand,
 } from './utils/handLink';
-import { Check, Clock, Github, Link2, Loader2, RefreshCw, Upload } from 'lucide-react';
+import { Check, Clock, Eye, EyeOff, Github, Link2, Loader2, RefreshCw, Upload } from 'lucide-react';
+
+/** Whether the outs line is wanted, remembered between visits. */
+const OUTS_SETTING = 'plo.outs';
+
+/**
+ * The most cards worth naming individually.
+ *
+ * Past this the list stops being an answer and becomes the percentage said at
+ * length — nobody reads "thirty-six of the forty rivers win" as a list. It is
+ * the short lists that carry information a number cannot: which eight cards,
+ * and therefore whether they are clean.
+ */
+const OUTS_LISTED = 12;
+
+function outsWanted(): boolean {
+  try {
+    return localStorage.getItem(OUTS_SETTING) !== 'off';
+  } catch {
+    return true;
+  }
+}
 
 const DEAD_CARD_SLOTS = 14;
 
@@ -91,6 +114,9 @@ function App() {
   const [history, setHistory] = useState<
     { street: string; win: number; tie: number }[]
   >([]);
+  /** The cards still to come that the user wants, when they have asked to see them. */
+  const [outs, setOuts] = useState<Outs | null>(null);
+  const [showOuts, setShowOuts] = useState(outsWanted);
 
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [isReading, setIsReading] = useState(false);
@@ -124,6 +150,7 @@ function App() {
     if (complete.length < 2) {
       setEquity(null);
       setHistory([]);
+      setOuts(null);
       return;
     }
 
@@ -178,6 +205,19 @@ function App() {
             });
           }
           setHistory(past);
+          // Only worked out when it is going to be shown. It is a second
+          // enumeration of its own, a run-out at a time, and there is no sense
+          // spending twenty-odd milliseconds on an answer nobody asked for.
+          setOuts(
+            showOuts
+              ? findOuts(
+                  complete,
+                  dealt,
+                  dead.filter((c): c is Card => c !== null),
+                  heroAt
+                )
+              : null
+          );
         }
 
         setError(null);
@@ -186,7 +226,19 @@ function App() {
       }
     }, 10);
     return () => clearTimeout(timer);
-  }, [seats, board, dead]);
+  }, [seats, board, dead, showOuts]);
+
+  const toggleOuts = () => {
+    setShowOuts(want => {
+      const next = !want;
+      try {
+        localStorage.setItem(OUTS_SETTING, next ? 'on' : 'off');
+      } catch {
+        /* a refused store only costs the setting, not the feature */
+      }
+      return next;
+    });
+  };
 
   /** Place a card into the selected slot, then step to the next one. */
   const placeCard = (card: Card) => {
@@ -410,9 +462,9 @@ function App() {
               // 1.15x the height left over, whichever is smaller. The chrome
               // above and below runs to 415px there, the deck being four rows.
               '--seat-card-w':
-                'clamp(20px, min(calc((100vw - 24px) * 0.072), calc((100vh - 415px) * 0.0828)), 34px)',
+                'clamp(20px, min(calc((100vw - 24px) * 0.072), calc((100vh - 435px) * 0.0828)), 34px)',
               '--board-card-w':
-                'clamp(24px, min(calc((100vw - 24px) * 0.083), calc((100vh - 415px) * 0.0955)), 40px)',
+                'clamp(24px, min(calc((100vw - 24px) * 0.083), calc((100vh - 435px) * 0.0955)), 40px)',
               '--dead-card-w': 'clamp(16px, 5.5vw, 28px)',
             }
           : {
@@ -442,7 +494,7 @@ function App() {
               // the window alone is what let a short one shrink the felt while
               // the cards stayed put and ran through the board.
               '--board-card-w':
-                'clamp(22px, min(calc((100vw - 24px) * 0.060), calc((100vh - 300px) * 0.126)), 72px)',
+                'clamp(22px, min(calc((100vw - 24px) * 0.060), calc((100vh - 320px) * 0.126)), 72px)',
               '--seat-card-w': 'var(--board-card-w)',
               // The dead row is reference, not the thing being read, so it
               // keeps its own size rather than growing with the table.
@@ -557,6 +609,64 @@ function App() {
                         )}
                       </span>
                     ))}
+                    <button
+                      onClick={toggleOuts}
+                      title={showOuts ? 'Hide the cards to come' : 'Show the cards to come'}
+                      className="flex items-center gap-1 text-neutral-500 hover:text-white shrink-0"
+                    >
+                      {showOuts ? <EyeOff size={11} /> : <Eye size={11} />}
+                      <span className="hidden sm:inline">Outs</span>
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* The second line is held open whether or not anything is on it,
+                  for the same reason as the first: the table is sized from what
+                  is left below this column, so a line arriving here would move
+                  every seat on the felt. Turning outs off empties this line;
+                  it does not remove it. */}
+              <div className="h-4 flex items-baseline gap-2 text-[11px] leading-none overflow-hidden">
+                {showOuts && outs && (
+                  <>
+                    <span className="text-emerald-300 font-medium whitespace-nowrap">
+                      {outs.street === 'river' ? 'Outs' : 'Ahead after'}{' '}
+                      <span className="text-white">{outs.cards.length}</span>
+                      <span className="text-neutral-500"> of {outs.total}</span>
+                    </span>
+                    <span className="text-white font-medium whitespace-nowrap">
+                      {((outs.cards.length / outs.total) * 100).toFixed(1)}%
+                    </span>
+                    {/* Named only when naming them is worth anything. Which
+                        eight cards win it is the whole question; which
+                        thirty-six is the same fact as the percentage, said at
+                        length. */}
+                    {outs.cards.length > 0 && outs.cards.length <= OUTS_LISTED && (
+                      <span className="whitespace-nowrap truncate">
+                        {outs.cards.map(card => (
+                          <span key={card.rank + card.suit} className="mr-1.5">
+                            <span className="text-white">
+                              {card.rank === 'T' ? '10' : card.rank}
+                            </span>
+                            <span style={{ color: SUIT_INK[card.suit] }}>
+                              {SUIT_SYMBOLS[card.suit]}
+                            </span>
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                    {outs.cards.length === 0 && (
+                      <span className="text-neutral-500 whitespace-nowrap">
+                        {outs.street === 'river'
+                          ? 'drawing dead'
+                          : 'no turn card puts you ahead'}
+                      </span>
+                    )}
+                    {outs.ties.length > 0 && (
+                      <span className="text-neutral-500 whitespace-nowrap">
+                        · {outs.ties.length} chop
+                      </span>
+                    )}
                   </>
                 )}
               </div>
@@ -676,7 +786,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 10.2
+        Runs entirely in your browser · nothing is uploaded · VERSION 10.3
       </footer>
     </div>
   );

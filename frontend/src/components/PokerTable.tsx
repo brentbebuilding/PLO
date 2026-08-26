@@ -154,8 +154,8 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       // puts the side hands through the board. Card sizes are capped off the
       // same expression, so the two cannot disagree.
       width: compact
-        ? 'min(100%, calc((100vh - 415px) * 1.15))'
-        : 'min(100%, calc((100vh - 300px) * 2.1))',
+        ? 'min(100%, calc((100vh - 435px) * 1.15))'
+        : 'min(100%, calc((100vh - 320px) * 2.1))',
       maxHeight: '100%',
     }}
   >

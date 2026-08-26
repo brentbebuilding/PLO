@@ -23,25 +23,6 @@ reviewed after the fact.
 
 Cheap, and independent of everything else.
 
-## Outs
-
-On the turn, the cards that win it: "any ten — 4 cards, 10%". On the flop, the
-cards that make the user favourite.
-
-This falls out of work already being done. The enumeration walks every run-out
-and counts wins; it just doesn't record *which* card produced them. Keeping a
-tally per card costs one array.
-
-## A link that restores the hand
-
-Encode the table state in the URL, so a spot can be bookmarked or sent to
-someone, plus a short list of recent hands to flick back through. Turns the
-tool into something a study set accumulates in rather than a one-shot
-calculator.
-
-Cheap. The state is six hands, five board cards and the dead row — under 30
-cards, which packs into a short string.
-
 ## Equity against a range
 
 "How does this hand do against any two broadway cards" rather than against one
