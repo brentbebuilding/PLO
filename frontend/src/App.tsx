@@ -819,7 +819,13 @@ function App() {
           10.10, then 10.11. The major number is for a change big enough to
           be worth announcing, and nothing since 10.0 has been. */}
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 10.14
+        {/* Kept on the footer's one line: the band above and below the table is
+            a fixed height and the felt is sized against it, so a second line
+            here would shrink every seat. */}
+        <a href="help.html" className="hover:text-neutral-300 underline underline-offset-2">
+          Help
+        </a>{' '}
+        · Runs entirely in your browser · nothing is uploaded · VERSION 10.15
       </footer>
     </div>
   );

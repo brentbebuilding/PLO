@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading a screenshot — Omaha Odds Calculator</title>
+<!--
+  Deliberately a plain page with its own styles rather than part of the app.
+  Help is the thing most wanted when the app itself is not working, so it does
+  not depend on the app's bundle loading; and the app's stylesheet is written
+  out under a hashed name that changes every build, so it could not be linked
+  from here reliably anyway.
+-->
+<style>
+  :root {
+    --ink: #f5f5f5;
+    --dim: #a3a3a3;
+    --faint: #737373;
+    --ground: #0a0a0a;
+    --panel: #4a1414;
+    --accent: #6ee7a8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    padding: 14px 20px;
+    border-bottom: 1px solid #262626;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  header b { font-size: 18px; }
+  header a { color: var(--dim); text-decoration: none; font-size: 14px; }
+  header a:hover { color: var(--ink); }
+  main { max-width: 900px; margin: 0 auto; padding: 28px 20px 60px; }
+  h1 { font-size: 26px; margin: 0 0 6px; line-height: 1.25; }
+  h2 { font-size: 17px; margin: 34px 0 8px; }
+  p { margin: 0 0 14px; color: var(--dim); }
+  p.lead { color: var(--ink); font-size: 18px; }
+  figure { margin: 22px 0 8px; }
+  figure img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border: 1px solid #333;
+    border-radius: 8px;
+    background: #000;
+  }
+  figcaption { color: var(--faint); font-size: 13px; margin-top: 8px; }
+  ul { margin: 0 0 14px; padding-left: 20px; color: var(--dim); }
+  li { margin-bottom: 6px; }
+  strong { color: var(--ink); font-weight: 600; }
+  .note {
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 22px 0;
+  }
+  .note p:last-child { margin-bottom: 0; }
+  footer {
+    border-top: 1px solid #262626;
+    padding: 14px 20px;
+    text-align: center;
+    color: var(--faint);
+    font-size: 12px;
+  }
+  footer a { color: var(--faint); }
+</style>
+</head>
+<body>
+
+<header>
+  <b>Omaha Odds Calculator</b>
+  <a href="./">&larr; back to the calculator</a>
+</header>
+
+<main>
+  <h1>Screenshot the whole replay window</h1>
+  <p class="lead">
+    That is the only thing you have to get right. Everything else the page does
+    for you.
+  </p>
+
+  <p>
+    The reader finds the community cards first and measures everything else
+    against them — where the hands panel is, how big a card should be, which
+    seat is yours. So the board has to be in the picture, along with the panel
+    down the left. A crop of just somebody's hand has nothing to measure
+    against and will not read.
+  </p>
+
+  <figure>
+    <img src="replay-example.png"
+         alt="A hand replay window: the hands panel down the left listing each
+              player and their cards, and the table in the middle with the
+              community cards across it.">
+    <figcaption>
+      The whole window, as it should be captured. Player names are blanked out
+      here; you do not need to do that. The size of the window makes no
+      difference — only that it is all there.
+    </figcaption>
+  </figure>
+
+  <h2>Getting it in</h2>
+  <ul>
+    <li>Drag the image file onto the dashed box, or</li>
+    <li>copy the screenshot and paste it anywhere on the page, or</li>
+    <li>tap the dashed box to pick a file.</li>
+  </ul>
+  <p>
+    It fills in the board and every hand the replay is showing, works out which
+    hand is yours, and puts the equity under each one. Nothing is uploaded —
+    the picture is read in your browser and never leaves it.
+  </p>
+
+  <h2>If a card comes back blank</h2>
+  <p>
+    A card the reader is not sure of is left empty rather than guessed at, so a
+    blank slot means "could not read this one", never "read it wrongly". Tap
+    the empty slot and then the card in the deck along the top to fill it in.
+  </p>
+
+  <div class="note">
+    <p>
+      <strong>The client dims cards it has folded</strong> — sometimes almost to
+      black. Those are the ones most likely to come back blank. Nothing is wrong
+      with your screenshot when that happens.
+    </p>
+  </div>
+
+  <h2>What the numbers mean</h2>
+  <ul>
+    <li><strong>Win / Tie</strong> under each hand: how often that hand wins the
+      pot outright, and how often it splits.</li>
+    <li><strong>Your equity</strong> along the top: how your own hand stood
+      before the flop, on the flop and on the turn — a replay shows you the
+      finished board, so this is the only way to see how the hand actually
+      ran.</li>
+    <li><strong>Outs</strong>, if switched on: on the turn, the river cards that
+      win it; on the flop, the turn cards that leave you ahead of everyone
+      else.</li>
+  </ul>
+  <p>
+    Every number is counted, not sampled. The same spot always gives the same
+    answer, to the last decimal.
+  </p>
+</main>
+
+<footer>
+  Runs entirely in your browser · nothing is uploaded ·
+  <a href="./">back to the calculator</a>
+</footer>
+
+</body>
+</html>
