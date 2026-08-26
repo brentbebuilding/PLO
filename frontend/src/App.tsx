@@ -815,8 +815,11 @@ function App() {
         </div>
       </main>
 
+      {/* The minor number counts up without carrying — 10.9 is followed by
+          10.10, then 10.11. The major number is for a change big enough to
+          be worth announcing, and nothing since 10.0 has been. */}
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 11.0
+        Runs entirely in your browser · nothing is uploaded · VERSION 10.10
       </footer>
     </div>
   );
