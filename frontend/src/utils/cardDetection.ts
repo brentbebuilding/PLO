@@ -61,8 +61,15 @@ const MIN_MARGIN = 0.05;
  * score. A heavily dimmed ten came back at 0.838, just under the floor, having
  * beaten every other rank by 0.42. Declining that is throwing away a certain
  * read to guard against a confusion that a margin of 0.42 rules out.
+ *
+ * Lowered from 0.80 on the evidence of a ten that scored 0.794 and led by
+ * 0.331 — the right rank by a mile, refused over six thousandths of score.
+ * Across the 349 rank glyphs in the screenshots to hand, the change admits
+ * that one card and nothing else, and leaves nothing at all refused. Which is
+ * the argument for it: 0.25 clear of every other rank is the evidence, and the
+ * score was only ever standing in for it.
  */
-const CONFIDENT_SCORE = 0.8;
+const CONFIDENT_SCORE = 0.75;
 const CONFIDENT_MARGIN = 0.25;
 
 /**
