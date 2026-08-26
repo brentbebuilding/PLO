@@ -822,10 +822,15 @@ function App() {
         {/* Kept on the footer's one line: the band above and below the table is
             a fixed height and the felt is sized against it, so a second line
             here would shrink every seat. */}
-        <a href="help.html" className="hover:text-neutral-300 underline underline-offset-2">
+        Runs entirely in your browser · nothing is uploaded · VERSION 10.16 ·{' '}
+        <a
+          href="help.html"
+          target="_blank"
+          rel="noopener"
+          className="hover:text-neutral-300 underline underline-offset-2"
+        >
           Help
-        </a>{' '}
-        · Runs entirely in your browser · nothing is uploaded · VERSION 10.15
+        </a>
       </footer>
     </div>
   );
