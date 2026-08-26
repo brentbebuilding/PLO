@@ -483,8 +483,15 @@ export function findHandRows(
   // whole rows, not just single cards, so two rows of the same panel
   // legitimately measure 41 and 29 pixels tall and any similarity test tight
   // enough to be worth having throws one of them away.
+  // Picked out by panelRows rather than by the left edge alone, because "left
+  // of a quarter of the way across" is not always only the panel: on a wide
+  // window the seat down the left of the felt reaches back to 0.24 of the
+  // image, and its owner's fanned cards came through as a third hand. Grouping
+  // by left edge and keeping the largest group settles it — the panel is a
+  // column and every row in it starts at the same x, while a seat's cards
+  // start wherever that seat is.
   const inPanel = image
-    ? usable.filter(row => row[0].x < image.width * PANEL_MAX_ORIGIN)
+    ? panelRows(usable, image.width).map(i => usable[i])
     : [];
   const chosen = inPanel.length > 0 ? inPanel : usable;
 
