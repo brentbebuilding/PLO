@@ -82,14 +82,22 @@ const CONFIDENT_MARGIN = 0.25;
  * eleven or twelve pixels tall, and stretching that to the grid invents detail
  * that cannot line up with a template taken from twenty.
  *
- * Measured across every screenshot to hand — 370 cards with a rank on them.
- * Every read the old floor rejected was in fact correct and every one came
- * from the same small window: a three at 0.782 over a two at 0.699, a king at
- * 0.769 over an eight at 0.637. The only genuine non-match in the whole set
- * scored 0.474 and beat its runner-up by 0.031, so it stays refused twice
- * over, by score and by margin both.
+ * Where the line sits is measured rather than picked. Grouping the 379 rank
+ * glyphs in the screenshots to hand by how tall they were drawn:
+ *
+ *   under 13px    20 glyphs   lowest score 0.769
+ *   13 to 15px     8 glyphs   lowest score 0.828
+ *   16 to 19px   180 glyphs   lowest score 0.787
+ *   20 to 23px    46 glyphs   lowest score 0.884
+ *   24px and up  125 glyphs   lowest score 0.884
+ *
+ * Twenty is where scores stop reaching below the full floor. Under it they do,
+ * and 180 glyphs is enough of a sample to say so. The margin test still
+ * applies to every read either way, and it is the one that catches a genuine
+ * confusion: the only real non-match in the set scored 0.474 and led by 0.031,
+ * so it stays refused on both counts.
  */
-const FULL_DETAIL_GLYPH = 16;
+const FULL_DETAIL_GLYPH = 20;
 const SMALL_GLYPH_MIN_SCORE = 0.75;
 
 export interface SlotReading {
