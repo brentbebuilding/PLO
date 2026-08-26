@@ -477,13 +477,17 @@ function App() {
               // the dropzone and the note under it. The dead row is not in it:
               // on a phone that row sits below the fold.
               '--board-card-w':
-                'clamp(22px, min(calc((100vw - 24px) * 0.081), calc((100vh - 430px) * 0.102)), 40px)',
+                'clamp(22px, min(calc((100vw - 24px) * 0.081), calc((100vh - 442px) * 0.102)), 40px)',
               // The same size as the board, as out wide. A hand used to be cut
               // to 0.072 of the felt's width so that a side hand could not
               // reach the hero's — but they are in different bands down the
               // felt now, so what they may not do is meet vertically, and that
               // is the ring's business rather than the card's.
               '--seat-card-w': 'var(--board-card-w)',
+              // The clear space between one band of cards and the next. Wide
+              // enough to hold the reading that hangs under a hand — which is
+              // roughly 0.37 of a card plus its padding — with a little over.
+              '--ring-gap': 'calc(var(--seat-card-w) * 0.5 + 4px)',
               '--dead-card-w': 'clamp(16px, 5.5vw, 28px)',
             }
           : {
@@ -812,7 +816,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 10.6
+        Runs entirely in your browser · nothing is uploaded · VERSION 10.7
       </footer>
     </div>
   );

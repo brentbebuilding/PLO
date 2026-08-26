@@ -30,13 +30,57 @@ export const SEAT_POSITIONS = [
  * its own. A side hand may then reach across the board's column, but never
  * across the board itself, so nothing is covered.
  */
+/*
+ * The same ring on a phone, spread down rather than across.
+ *
+ * A hand is four cards wide and a phone is not, so a side seat and the board
+ * cannot be kept apart sideways — at 390px there is simply not enough felt
+ * between them. They are kept apart vertically instead: the felt is close to
+ * square rather than a long oval, which gives each row of the ring a band of
+ * its own. A side hand may then reach across the board's column, but never
+ * across the board itself, so nothing is covered.
+ *
+ * The four side seats are placed against the board rather than at a percentage
+ * of the felt, so that the gap above the board and the gap below it are the
+ * same by construction. By percentage they were not: the reading that hangs
+ * under a hand sits in the upper gap and nothing sits in the lower one, so the
+ * board ended up 30px under the hands above it and 8px over the hands below,
+ * and looked to be sitting on the lower ones. A card is 1.4 times its own
+ * width, so half a card is 0.7 of a width and one and a half is 2.1.
+ */
+const RING_GAP = 'var(--ring-gap)';
+const HALF_CARD = 'var(--seat-card-w) * 0.7';
+const CARD_AND_A_HALF = 'var(--seat-card-w) * 2.1';
+
 const COMPACT_SEAT_POSITIONS = [
-  { top: '0%', left: '50%', transform: 'translateX(-50%)' },   // hero, top centre
-  { top: '21%', left: '82%', transform: 'translateX(-50%)' },  // upper right
-  { top: '59%', left: '82%', transform: 'translateX(-50%)' },  // lower right
-  { top: '81%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
-  { top: '59%', left: '18%', transform: 'translateX(-50%)' },  // lower left
-  { top: '21%', left: '18%', transform: 'translateX(-50%)' },  // upper left
+  // Hero at the top of the felt; the slack between it and the seats below is
+  // whatever the ring does not need, and it is the only place there is any.
+  { top: '0%', left: '50%', transform: 'translateX(-50%)' },
+  {
+    top: `calc(50% - (${CARD_AND_A_HALF}) - ${RING_GAP})`,
+    left: '82%',
+    transform: 'translateX(-50%)',
+  },
+  {
+    top: `calc(50% + (${HALF_CARD}) + ${RING_GAP})`,
+    left: '82%',
+    transform: 'translateX(-50%)',
+  },
+  {
+    top: `calc(50% + (${CARD_AND_A_HALF}) + ${RING_GAP} * 2)`,
+    left: '50%',
+    transform: 'translateX(-50%)',
+  },
+  {
+    top: `calc(50% + (${HALF_CARD}) + ${RING_GAP})`,
+    left: '18%',
+    transform: 'translateX(-50%)',
+  },
+  {
+    top: `calc(50% - (${CARD_AND_A_HALF}) - ${RING_GAP})`,
+    left: '18%',
+    transform: 'translateX(-50%)',
+  },
 ];
 
 /*
@@ -154,7 +198,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       // puts the side hands through the board. Card sizes are capped off the
       // same expression, so the two cannot disagree.
       width: compact
-        ? 'min(100%, calc((100vh - 430px) * 1.15))'
+        ? 'min(100%, calc((100vh - 442px) * 1.15))'
         : 'min(100%, calc((100vh - 320px) * 2.1))',
       // A phone stops the felt shrinking once the cards have stopped. Seat
       // cards bottom out at 20px and a side hand may take 0.072 of the felt's
