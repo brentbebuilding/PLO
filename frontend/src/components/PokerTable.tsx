@@ -32,11 +32,11 @@ export const SEAT_POSITIONS = [
  */
 const COMPACT_SEAT_POSITIONS = [
   { top: '0%', left: '50%', transform: 'translateX(-50%)' },   // hero, top centre
-  { top: '20%', left: '82%', transform: 'translateX(-50%)' },  // upper right
-  { top: '62%', left: '82%', transform: 'translateX(-50%)' },  // lower right
-  { top: '82%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
-  { top: '62%', left: '18%', transform: 'translateX(-50%)' },  // lower left
-  { top: '20%', left: '18%', transform: 'translateX(-50%)' },  // upper left
+  { top: '21%', left: '82%', transform: 'translateX(-50%)' },  // upper right
+  { top: '59%', left: '82%', transform: 'translateX(-50%)' },  // lower right
+  { top: '81%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
+  { top: '59%', left: '18%', transform: 'translateX(-50%)' },  // lower left
+  { top: '21%', left: '18%', transform: 'translateX(-50%)' },  // upper left
 ];
 
 /*
@@ -145,7 +145,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       // sideways is nearly free. On a phone the opposite holds — there is no
       // width to spare and the page can run on downwards — so the felt is
       // nearly square and the ring spreads down instead.
-      aspectRatio: compact ? '23 / 22' : '21 / 10',
+      aspectRatio: compact ? '23 / 20' : '21 / 10',
       // The height left over is the window less the fixed band of header,
       // deck, dead row and footer around it. Measuring that band at runtime
       // and feeding it back in through a variable was the obvious way to do
@@ -154,7 +154,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       // puts the side hands through the board. Card sizes are capped off the
       // same expression, so the two cannot disagree.
       width: compact
-        ? 'min(100%, calc((100vh - 400px) * 1.045))'
+        ? 'min(100%, calc((100vh - 430px) * 1.15))'
         : 'min(100%, calc((100vh - 320px) * 2.1))',
       // A phone stops the felt shrinking once the cards have stopped. Seat
       // cards bottom out at 20px and a side hand may take 0.072 of the felt's
@@ -231,7 +231,12 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             style={{
               fontSize: `calc(var(--seat-card-w) * ${compact ? 0.34 : 0.36})`,
             }}
-            className="absolute top-full mt-1 left-1/2 -translate-x-1/2 bg-neutral-900/90 px-2 py-0.5 rounded text-center whitespace-nowrap leading-tight"
+            className={`absolute top-full left-1/2 -translate-x-1/2 bg-neutral-900/90 rounded text-center whitespace-nowrap leading-none ${
+              // The padding around this is a fixed number of pixels, so on a
+              // phone it is a far larger share of the band than the number it
+              // surrounds. Five bands down the felt pay for it four times.
+              compact ? 'mt-0.5 px-1 py-px' : 'mt-1 px-2 py-0.5 leading-tight'
+            }`}
           >
             {compact ? (
               // Just the number on a phone. Two labelled lines is 30px of

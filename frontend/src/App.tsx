@@ -477,7 +477,7 @@ function App() {
               // the dropzone and the note under it. The dead row is not in it:
               // on a phone that row sits below the fold.
               '--board-card-w':
-                'clamp(24px, min(calc((100vw - 24px) * 0.083), calc((100vh - 400px) * 0.0955)), 40px)',
+                'clamp(22px, min(calc((100vw - 24px) * 0.081), calc((100vh - 430px) * 0.102)), 40px)',
               // The same size as the board, as out wide. A hand used to be cut
               // to 0.072 of the felt's width so that a side hand could not
               // reach the hero's — but they are in different bands down the
@@ -812,7 +812,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 10.5
+        Runs entirely in your browser · nothing is uploaded · VERSION 10.6
       </footer>
     </div>
   );
