@@ -420,6 +420,22 @@ export function findHandRows(
   minCards = 2,
   image?: PixelSource
 ): CardRegion[][] {
+  /*
+   * A card is about 0.71 as wide as it is tall, and the bounds either side of
+   * that are there to throw out things that are not cards.
+   *
+   * The upper bound is generous because a card that measures square is usually
+   * still a card. The client draws a folded hand very dim, and a dim card stops
+   * registering partway down: two hearts on one panel row came back 32 by 31
+   * against their neighbours' 32 by 45, which is an aspect of 1.03. At a ceiling
+   * of 1.0 they were not cards at all, and that hand lost half of itself. The
+   * row is squared back up to its own median height once grouped, so a short
+   * card only has to survive this far to be read properly.
+   *
+   * Nothing else in the set moves at any ceiling up to 1.35 — the shapes that
+   * have to be kept out are kept out by size against the board and by having to
+   * line up in a row, not by this.
+   */
   const candidates = regions.filter(r => {
     const aspect = r.width / r.height;
     return (
@@ -427,7 +443,7 @@ export function findHandRows(
       r.height >= 20 &&
       r.fill >= 0.45 &&
       aspect >= 0.5 &&
-      aspect <= 1.0
+      aspect <= 1.2
     );
   });
 
