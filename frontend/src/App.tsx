@@ -476,10 +476,14 @@ function App() {
               // above and below is the header, the deck and its two readouts,
               // the dropzone and the note under it. The dead row is not in it:
               // on a phone that row sits below the fold.
-              '--seat-card-w':
-                'clamp(20px, min(calc((100vw - 24px) * 0.072), calc((100vh - 400px) * 0.0828)), 34px)',
               '--board-card-w':
                 'clamp(24px, min(calc((100vw - 24px) * 0.083), calc((100vh - 400px) * 0.0955)), 40px)',
+              // The same size as the board, as out wide. A hand used to be cut
+              // to 0.072 of the felt's width so that a side hand could not
+              // reach the hero's — but they are in different bands down the
+              // felt now, so what they may not do is meet vertically, and that
+              // is the ring's business rather than the card's.
+              '--seat-card-w': 'var(--board-card-w)',
               '--dead-card-w': 'clamp(16px, 5.5vw, 28px)',
             }
           : {
@@ -808,7 +812,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 10.4
+        Runs entirely in your browser · nothing is uploaded · VERSION 10.5
       </footer>
     </div>
   );
