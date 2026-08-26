@@ -47,7 +47,7 @@ export const CardRail: React.FC<CardRailProps> = ({ used, onPick, disabled, comp
                     title={taken ? 'Already in play' : undefined}
                     style={{
                       width: 'var(--rail-card-w)',
-                      height: 'calc(var(--rail-card-w) * 2.1)',
+                      height: 'var(--rail-card-h)',
                     }}
                     className={`rounded-sm border border-black/40 overflow-hidden transition-opacity ${
                       taken

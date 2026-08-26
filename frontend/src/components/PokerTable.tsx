@@ -32,11 +32,11 @@ export const SEAT_POSITIONS = [
  */
 const COMPACT_SEAT_POSITIONS = [
   { top: '0%', left: '50%', transform: 'translateX(-50%)' },   // hero, top centre
-  { top: '22%', left: '82%', transform: 'translateX(-50%)' },  // upper right
-  { top: '60%', left: '82%', transform: 'translateX(-50%)' },  // lower right
-  { top: '80%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
-  { top: '60%', left: '18%', transform: 'translateX(-50%)' },  // lower left
-  { top: '22%', left: '18%', transform: 'translateX(-50%)' },  // upper left
+  { top: '20%', left: '82%', transform: 'translateX(-50%)' },  // upper right
+  { top: '62%', left: '82%', transform: 'translateX(-50%)' },  // lower right
+  { top: '82%', left: '50%', transform: 'translateX(-50%)' },  // bottom centre
+  { top: '62%', left: '18%', transform: 'translateX(-50%)' },  // lower left
+  { top: '20%', left: '18%', transform: 'translateX(-50%)' },  // upper left
 ];
 
 /*
@@ -154,9 +154,18 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       // puts the side hands through the board. Card sizes are capped off the
       // same expression, so the two cannot disagree.
       width: compact
-        ? 'min(100%, calc((100vh - 435px) * 1.15))'
+        ? 'min(100%, calc((100vh - 400px) * 1.15))'
         : 'min(100%, calc((100vh - 320px) * 2.1))',
-      maxHeight: '100%',
+      // A phone stops the felt shrinking once the cards have stopped. Seat
+      // cards bottom out at 20px and a side hand may take 0.072 of the felt's
+      // width, so below 278px the ring no longer fits the felt it is drawn on
+      // and the hands hang off it. Holding the size and letting a short screen
+      // scroll a little is the better of the two.
+      minWidth: compact ? '278px' : undefined,
+      // Out wide the box is never allowed past the space it has, which is what
+      // keeps the page from scrolling vertically. A phone scrolls anyway, so
+      // capping there only squashes the box out of its own aspect ratio.
+      maxHeight: compact ? undefined : '100%',
     }}
   >
     {/* Felt. Deliberately unbranded. */}

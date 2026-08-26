@@ -441,11 +441,19 @@ function App() {
 
   return (
     <div
-      className={`h-screen flex flex-col bg-neutral-950 text-white ${
+      className={`flex flex-col bg-neutral-950 text-white ${
         // The wide layout shrinks with the window until it reaches the width
         // the phone layout would take over at, then holds its size and lets
         // the page overflow rather than degrading any further.
-        isNarrow ? 'overflow-hidden' : 'overflow-x-auto overflow-y-hidden'
+        //
+        // On a phone the page is allowed to run past the bottom of the screen
+        // instead, so that the dead row can sit below the fold. Everything that
+        // matters is sized against the viewport and so still lands on the first
+        // screen; the dead row is a flick away, which is the right distance for
+        // a row that is filled in about once a session.
+        isNarrow
+          ? 'min-h-screen overflow-x-hidden'
+          : 'h-screen overflow-x-auto overflow-y-hidden'
       }`}
       style={
         ({
@@ -457,14 +465,21 @@ function App() {
               // hero's, which caps a seat card at 0.072 of the felt's width.
               // The deck rail is thirteen cards with a pixel between.
               '--rail-card-w': 'clamp(15px, calc((100vw - 48px) / 13), 30px)',
-              '--rail-card-h': 'calc(var(--rail-card-w) * 1.26)',
+              // Shorter than a card's own shape, where out wide the deck keeps
+              // it. Four rows of the deck was 289px of a 700px phone — more
+              // than the table got — and the height has to come from somewhere.
+              // Only the height is given up: the width is the tap target on a
+              // row of thirteen, and that is untouched.
+              '--rail-card-h': 'calc(var(--rail-card-w) * 1.45)',
               // Capped by the felt too, which on a phone is the page width or
-              // 1.15x the height left over, whichever is smaller. The chrome
-              // above and below runs to 415px there, the deck being four rows.
+              // 1.15x the height left over, whichever is smaller. The band
+              // above and below is the header, the deck and its two readouts,
+              // the dropzone and the note under it. The dead row is not in it:
+              // on a phone that row sits below the fold.
               '--seat-card-w':
-                'clamp(20px, min(calc((100vw - 24px) * 0.072), calc((100vh - 435px) * 0.0828)), 34px)',
+                'clamp(20px, min(calc((100vw - 24px) * 0.072), calc((100vh - 400px) * 0.0828)), 34px)',
               '--board-card-w':
-                'clamp(24px, min(calc((100vw - 24px) * 0.083), calc((100vh - 435px) * 0.0955)), 40px)',
+                'clamp(24px, min(calc((100vw - 24px) * 0.083), calc((100vh - 400px) * 0.0955)), 40px)',
               '--dead-card-w': 'clamp(16px, 5.5vw, 28px)',
             }
           : {
@@ -479,7 +494,7 @@ function App() {
               // what remains. Full size holds down to about a 1100px window.
               '--rail-card-w':
                 'clamp(14px, calc((min(100vw - 24px, 1152px) - 294px) / 26), 30px)',
-              '--rail-card-h': 'calc(var(--rail-card-w) * 1.4)',
+              '--rail-card-h': 'calc(var(--rail-card-w) * 2.1)',
               // Hands are drawn at the same size as the board. The cap comes
               // from the one thing that has to hold: a side hand reaches 2.2
               // card widths towards the middle and the board 2.74, so 4.94 of
@@ -594,12 +609,19 @@ function App() {
                         here read as disagreeing with the seat: one flop had
                         51.25% under the deck and "Win 40.99%" on the felt,
                         the difference being ties. */}
+                    {/* The hint is dropped on a phone. Four streets of two
+                        figures each already runs to the edge of a 390px screen,
+                        and losing the last street's number to explain the
+                        format of the others is a poor trade. */}
                     <span className="text-emerald-300 font-medium whitespace-nowrap">
-                      Your equity <span className="text-neutral-500">(win / tie)</span>
+                      Your equity
+                      {!isNarrow && (
+                        <span className="text-neutral-500"> (win / tie)</span>
+                      )}
                     </span>
                     {history.map(({ street, win, tie }) => (
                       <span key={street} className="text-neutral-400 whitespace-nowrap">
-                        {street}{' '}
+                        {isNarrow && street === 'Preflop' ? 'Pre' : street}{' '}
                         <span className="text-white font-medium">{win.toFixed(2)}%</span>
                         {tie > 0 && (
                           <>
@@ -786,7 +808,7 @@ function App() {
       </main>
 
       <footer className="px-4 py-1 text-center text-neutral-600 text-[10px] shrink-0">
-        Runs entirely in your browser · nothing is uploaded · VERSION 10.3
+        Runs entirely in your browser · nothing is uploaded · VERSION 10.4
       </footer>
     </div>
   );
