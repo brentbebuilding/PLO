@@ -421,31 +421,38 @@ export function findHandRows(
   image?: PixelSource
 ): CardRegion[][] {
   /*
-   * A card is about 0.71 as wide as it is tall, and the bounds either side of
-   * that are there to throw out things that are not cards.
+   * A card is about 0.71 as wide as it is tall.
    *
-   * The upper bound is generous because a card that measures square is usually
-   * still a card. The client draws a folded hand very dim, and a dim card stops
-   * registering partway down: two hearts on one panel row came back 32 by 31
-   * against their neighbours' 32 by 45, which is an aspect of 1.03. At a ceiling
-   * of 1.0 they were not cards at all, and that hand lost half of itself. The
-   * row is squared back up to its own median height once grouped, so a short
-   * card only has to survive this far to be read properly.
+   * Two bars rather than one, because the shape means different things
+   * depending on what the region is being asked to do. A card that measures
+   * square is usually still a card: the client draws a folded hand very dim and
+   * a dim card stops registering partway down, so two hearts on one panel row
+   * came back 32 by 31 against their neighbours' 32 by 45. But so is a good
+   * deal of the furniture on the dimmed table behind the modal, and one such
+   * blob — 38 by 35, sixteen pixels above a real row — seized that row before
+   * its cards could group. The two cards that did join the blob were carried
+   * out of the panel's column with it and lost.
    *
-   * Nothing else in the set moves at any ceiling up to 1.35 — the shapes that
-   * have to be kept out are kept out by size against the board and by having to
-   * line up in a row, not by this.
+   * So a squarish region may join a row that proper cards have already formed,
+   * but may not start one. Beside real cards it is almost certainly the clipped
+   * bottom of one; on its own it is almost certainly not a card at all. What
+   * does slip in still has to survive being cut into runs at an even pitch,
+   * which is what drops the blob once the cards outnumber it.
    */
-  const candidates = regions.filter(r => {
+  const cardShaped = (r: CardRegion, maxAspect: number) => {
     const aspect = r.width / r.height;
     return (
       !board.cards.includes(r) &&
       r.height >= 20 &&
       r.fill >= 0.45 &&
       aspect >= 0.5 &&
-      aspect <= 1.2
+      aspect <= maxAspect
     );
-  });
+  };
+  const candidates = regions.filter(r => cardShaped(r, 1.0));
+  const squarish = regions.filter(
+    r => cardShaped(r, 1.2) && !candidates.includes(r)
+  );
 
   const rows: CardRegion[][] = [];
   for (const card of candidates) {
@@ -470,6 +477,18 @@ export function findHandRows(
     );
     if (row) row.push(card);
     else rows.push([card]);
+  }
+
+  /** Belongs to this row if it lines up with the card that started it. */
+  const fitsRow = (r: CardRegion[], card: CardRegion) =>
+    Math.abs(r[0].y - card.y) < card.height * 0.35 &&
+    Math.abs(r[0].height - card.height) <
+      Math.max(r[0].height, card.height) * 0.35 &&
+    Math.max(r[0].width, card.width) / Math.min(r[0].width, card.width) < 1.4;
+
+  for (const card of squarish) {
+    const row = rows.find(r => fitsRow(r, card));
+    if (row) row.push(card);
   }
 
   // A hand is a run of at most four cards at a regular pitch. Anything else
