@@ -1182,6 +1182,17 @@ const SEAT_MIN_CORRELATION = 0.85;
 const ORDER_MIN_MARGIN = 0.06;
 
 /**
+ * How far ahead the surviving reading's own seat must look, once the vote count
+ * has failed to separate it from the others.
+ *
+ * These comparisons are made against a covered seat, so they are low across the
+ * board — a correct one measured 0.68 where the alternative measured 0.53. The
+ * bar is on the gap rather than the score for that reason, and it is set wide
+ * enough that noise between two equally good readings still refuses.
+ */
+const HERO_TIEBREAK_MARGIN = 0.1;
+
+/**
  * Contrast a crop must carry before it is allowed to match anything.
  *
  * Correlation divides by the variation it finds, so two nearly flat crops
@@ -1542,8 +1553,18 @@ function findHeroFromSeats(
         });
     });
 
+  const atHeroSeatEmpty = scoreAgainst(heroProbes, empty);
   vote(holdingCards, atHeroSeat, HERO_SEAT);
-  vote(empty, scoreAgainst(heroProbes, empty), HERO_SEAT);
+  vote(empty, atHeroSeatEmpty, HERO_SEAT);
+
+  // How much each panel row looks like the user's own seat, kept for every row
+  // rather than only the ones that cleared the voting bar. Under an ALL-IN disc
+  // nothing clears it, but the readings still differ in how well their answer
+  // matches, and that difference is what separates two readings that explain
+  // the same recognitions.
+  const heroLikeness = new Map<number, number>();
+  holdingCards.forEach((row, i) => heroLikeness.set(row.place, atHeroSeat[i]));
+  empty.forEach((row, i) => heroLikeness.set(row.place, atHeroSeatEmpty[i]));
 
   for (let seat = 0; seat < seatCount; seat++) {
     if (seat === HERO_SEAT) continue;
@@ -1563,7 +1584,7 @@ function findHeroFromSeats(
   // that reach the same row are the same answer, so the strongest stands for
   // all of them.
   const everything = found.reduce((sum, hit) => sum + hit.weight, 0);
-  const byRow = new Map<number, number>();
+  const byRow = new Map<number, { total: number; hero: number }>();
   for (let taken = 0; taken < 1 << seatCount; taken++) {
     if (!(taken & (1 << HERO_SEAT))) continue;
     const seats: number[] = [];
@@ -1597,18 +1618,50 @@ function findHeroFromSeats(
       // alongside the rest so that it can win, rather than being passed over in
       // favour of a worse reading that does name a row.
       const key = row < 0 ? -1 : candidates[row];
-      byRow.set(key, Math.max(byRow.get(key) ?? 0, total));
+
+      // The panel row this reading calls the user's, and how much it actually
+      // looks like their seat. Rows repeat every full turn, so several places
+      // can share the residue; the best of them stands for the reading.
+      let hero = 0;
+      for (const seen of panel)
+        if ((((seen.place % size) + size) % size) === heroPlace)
+          hero = Math.max(hero, heroLikeness.get(seen.place) ?? 0);
+
+      const had = byRow.get(key);
+      if (!had || total > had.total) byRow.set(key, { total, hero });
+      else if (total === had.total && hero > had.hero) had.hero = hero;
     }
   }
 
-  const ranked = [...byRow.entries()].sort((a, b) => b[1] - a[1]);
-  if (ranked.length === 0 || ranked[0][1] <= 0) return null;
-  const runnerUp = ranked.length > 1 ? ranked[1][1] : 0;
-  if (ranked[0][1] - runnerUp < ORDER_MIN_MARGIN) return null;
-  if (ranked[0][0] < 0) return null;
+  const ranked = [...byRow.entries()].sort((a, b) => b[1].total - a[1].total);
+  if (ranked.length === 0 || ranked[0][1].total <= 0) return null;
+
+  const runnerUp = ranked.length > 1 ? ranked[1][1].total : 0;
+  let winner = ranked[0];
+
+  // Two readings can explain exactly the same recognitions and still disagree,
+  // when the only thing between them is a seat nothing was recognised at:
+  // dropping that seat costs a reading nothing and shifts every row past it one
+  // place around the table. Counting votes cannot separate those, so settle them
+  // on how much each reading's answer looks like the user's own seat — weak
+  // evidence, since the disc is over it, but it is the evidence the vote count
+  // is blind to, and the readings genuinely differ in it.
+  if (ranked[0][1].total - runnerUp < ORDER_MIN_MARGIN) {
+    const close = ranked.filter(
+      entry => ranked[0][1].total - entry[1].total < ORDER_MIN_MARGIN
+    );
+    // One reading this close to nothing else is simply too weak to act on,
+    // which is what the margin meant before there was anything to break.
+    if (close.length < 2) return null;
+    close.sort((a, b) => b[1].hero - a[1].hero);
+    if (close[0][1].hero - close[1][1].hero < HERO_TIEBREAK_MARGIN) return null;
+    winner = close[0];
+  }
+
+  if (winner[0] < 0) return null;
 
   return {
-    row: ranked[0][0],
-    correlation: ranked[0][1] + SEAT_MIN_CORRELATION,
+    row: winner[0],
+    correlation: winner[1].total + SEAT_MIN_CORRELATION,
   };
 }
