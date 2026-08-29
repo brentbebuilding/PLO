@@ -633,13 +633,25 @@ function isCardSized(height: number, board: BoardAnchor): boolean {
  * a fraction of the card, so a short region puts that box in the wrong place
  * and crops the glyph: the ten in that hand came back unread.
  *
- * The row's median is the honest size, since clipping only ever takes pixels
- * away. Only the extent is corrected, never the position of the top-left
- * corner, which is where the rank is and is the part that always registers.
+ * Since clipping only ever takes pixels away, the tallest card in the row is
+ * the honest size and the median is only honest while most of the row is
+ * intact. One panel row arrived as 38, 28, 28, 28 pixels for four cards drawn
+ * identically — the rank and the pip below it merge into one region or stay
+ * apart, and here three of the four stayed apart. Its median was a clipped
+ * value, which cropped every glyph in the row: an ace read as a four, a jack as
+ * a ten, and the fourth card not at all.
+ *
+ * Nothing inflates a region the other way. A region that merged with its
+ * neighbour vertically would be far too tall for its width, and is already gone
+ * before this — the shape filter that admits a card wants an aspect of at least
+ * 0.5, and a merge of two halves the ratio.
+ *
+ * Only the extent is corrected, never the position of the top-left corner,
+ * which is where the rank is and is the part that always registers.
  */
 function squareUpRow(row: CardRegion[]): CardRegion[] {
   if (row.length < 2) return row;
-  const height = median(row.map(c => c.height));
+  const height = Math.max(...row.map(c => c.height));
   return row.map(card => (card.height === height ? card : { ...card, height }));
 }
 
