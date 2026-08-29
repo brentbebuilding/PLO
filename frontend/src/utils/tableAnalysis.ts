@@ -531,7 +531,27 @@ export function findHandRows(
   const chosen = inPanel.length > 0 ? inPanel : usable;
 
   const filled = image ? chosen.map(row => fillRowGaps(row, image)) : chosen;
-  const faceUp = image ? filled.filter(row => !isFaceDown(row, image)) : filled;
+
+  // The panel lists four cards for every player it names, so a row from it
+  // still short of four once the gaps are filled was not fully detected — and
+  // an incomplete row cannot be judged. The face-down test needs three cards to
+  // argue from, and below that there is nothing to separate a pair of card
+  // backs from two cards of one suit: across the corpus the closest backs
+  // measured 0.892 against each other while two genuinely different ranks
+  // sharing a suit reached 0.901. Four card backs whose fill left only two of
+  // them standing came through as an opponent holding two fives, which is worse
+  // than the hand simply being absent — a phantom takes real cards out of the
+  // deck and every equity on the table is then wrong.
+  //
+  // Nothing is lost by insisting. Equity needs all four cards of a hand, so a
+  // row that arrives short cannot be priced anyway. Only the panel is held to
+  // this: a seat's own cards are fanned, and reading some of them is the best
+  // that can be done there.
+  const whole =
+    inPanel.length > 0
+      ? filled.filter(row => row.length >= CARDS_IN_HAND)
+      : filled;
+  const faceUp = image ? whole.filter(row => !isFaceDown(row, image)) : whole;
 
   // Sized against the board only after each row has been squared up to its own
   // median. A dimmed card stops registering partway down and comes back short,
