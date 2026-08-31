@@ -767,13 +767,44 @@ function dominantSuit(
  * Cards dealt as a group sit at a regular pitch. A gap well outside that pitch
  * means the next card belongs to something else that happens to share a height.
  */
+/**
+ * The spacing a row is really drawn at: the gap the most other gaps agree with.
+ *
+ * A median only holds while the strays are a minority. One row measured
+ * 397, 80, 78, 351 — the three community cards, with one card of a fanned hand
+ * pulled in from either side, both sitting at the board's own height. The
+ * median of those four is 351, which is the distance between two unrelated
+ * things; measured against it nothing in the row looked like a break, and all
+ * five came through as the board.
+ *
+ * The smallest gap is no safer. Cards in a fan overlap far more tightly than
+ * the board is spaced, so two of those in a row would set a pitch that the
+ * board's own cards then appear to break.
+ *
+ * Agreement survives both. On 82, 81, 82, 82, 246 the pitch wins on four votes;
+ * on 397, 80, 78, 351 each gap has exactly one companion, and the tie goes to
+ * the smaller pair — which is the board, since a stray is always further off
+ * than the next card along.
+ */
+function commonGap(gaps: number[]): number {
+  let best = gaps[0];
+  let most = -1;
+  for (const gap of gaps) {
+    const support = gaps.filter(g => Math.abs(g - gap) <= gap * 0.25).length;
+    if (support > most || (support === most && gap < best)) {
+      most = support;
+      best = gap;
+    }
+  }
+  return best;
+}
+
 function splitOnSpacingBreak(row: CardRegion[]): CardRegion[][] {
   if (row.length < 3) return [row];
   const sorted = [...row].sort((a, b) => a.x - b.x);
 
   const gaps = sorted.slice(1).map((c, i) => c.x - sorted[i].x);
-  const ordered = [...gaps].sort((a, b) => a - b);
-  const typical = ordered[Math.floor(ordered.length / 2)];
+  const typical = commonGap(gaps);
 
   const runs: CardRegion[][] = [];
   let current: CardRegion[] = [sorted[0]];
