@@ -1143,9 +1143,17 @@ export function findHeroRow(
   // A prefix sum over every pixel, which on a large screenshot is a hundred
   // megabytes to fill. One, shared by everything below.
   const integral = buildIntegral(image);
-  return board && board.cards.length >= 3
-    ? findHeroFromSeats(image, rows, board, integral)
-    : findHeroBySweep(image, rows, integral);
+  if (board && board.cards.length >= 3)
+    return findHeroFromSeats(image, rows, board, integral);
+
+  // The sweep answers almost every board-less screenshot and costs a fraction
+  // of what the ring fit does, so it goes first and the fit only ever runs on
+  // what it could not do. Nothing that reads correctly today reaches the code
+  // below.
+  return (
+    findHeroBySweep(image, rows, integral) ??
+    findHeroByRing(image, rows, integral)
+  );
 }
 
 /**
@@ -1205,6 +1213,258 @@ function findHeroBySweep(
   }
 
   return best && best.correlation >= HERO_MIN_CORRELATION ? best : null;
+}
+
+/** A panel row's avatar, found somewhere on the felt. */
+interface FoundSeat {
+  /** Which panel row, counted in rows from the first one holding cards. */
+  place: number;
+  /** Centre of the avatar as drawn at the seat. */
+  x: number;
+  y: number;
+  correlation: number;
+}
+
+/**
+ * Find the user by working out where the seats are, when nothing else can.
+ *
+ * The sweep fails on exactly one kind of screenshot: no board, and the user
+ * all-in. With no board there is no frame to measure a seat against, so the
+ * only thing left is to hunt for their avatar — and a player who is all-in has
+ * a disc stamped over theirs. One such screenshot scored the right row at 0.634
+ * and the wrong one at 0.721, so it is not a matter of lowering the bar; the
+ * sweep does not merely miss, it prefers the wrong player.
+ *
+ * What is still true is that everyone who folded is sitting there in plain
+ * view. Their avatars are not covered, and the same picture appears beside
+ * their row in the panel — so each row of the panel, the ones holding no cards
+ * included, is searched for across the whole felt. That gives a handful of
+ * seats whose position is known and whose place in the panel is known.
+ *
+ * From there the ring does the rest. Seats sit at fixed positions around the
+ * table and the panel lists them clockwise, so a table size, a starting seat
+ * and a scale are enough to say where every seat should be. Those are fitted to
+ * the seats that were found, and the user is whichever row lands on the seat at
+ * the bottom — which needs no avatar of its own, and so survives the disc.
+ */
+function findHeroByRing(
+  image: PixelSource,
+  rows: CardRegion[][],
+  integral: Integral
+): HeroMatch | null {
+  const candidates = panelRows(rows, image.width);
+  const tops = candidates.map(i => rows[i][0].y);
+  const reference = panelAvatarBox(rows[candidates[0]]);
+  const pitch = panelRowPitch(
+    tops,
+    median(candidates.map(i => rows[i][0].height))
+  );
+  const offset = reference.y - tops[0];
+  const places = candidates.map((_, n) => Math.round((tops[n] - tops[0]) / pitch));
+
+  // The panel lists every player and no more, so its rows are a run no longer
+  // than the table has seats. Whatever that run is, it contains every row that
+  // held cards — which bounds where its ends can be, and so which places are
+  // worth the cost of a search.
+  const seatCount = SEAT_OFFSETS.length;
+  const lowest = Math.max(...places) - (seatCount - 1);
+  const highest = Math.min(...places) + (seatCount - 1);
+
+  const found: FoundSeat[] = [];
+  for (let place = lowest; place <= highest; place++) {
+    const y = tops[0] + place * pitch + offset;
+    if (y < 0 || y + reference.h > image.height) continue;
+    const thumb = prepare(
+      avatarSignature(integral, reference.x, y, reference.w, reference.h)
+    );
+    if (spread(thumb) < PANEL_MIN_CONTRAST) continue;
+
+    const seat = searchFelt(image, integral, thumb, reference.w, reference.h);
+    if (seat && seat.correlation >= RING_MIN_CORRELATION)
+      found.push({ place, ...seat });
+  }
+  if (found.length < RING_MIN_SEATS) return null;
+
+  return fitSeatRing(found, candidates, places);
+}
+
+/** One crop the felt search is considering, and how well it matched. */
+interface Hit {
+  x: number;
+  y: number;
+  scale: number;
+  correlation: number;
+}
+
+/**
+ * Where on the felt a panel thumbnail is drawn, over position and scale.
+ *
+ * Coarse first and then once around the winner, because the felt is most of the
+ * image and searching all of it at the resolution the answer needs would cost
+ * more than the rest of reading the screenshot put together. The coarse step is
+ * well inside an avatar's width, so a real seat cannot fall between two probes.
+ */
+function searchFelt(
+  image: PixelSource,
+  integral: Integral,
+  thumb: Prepared,
+  boxW: number,
+  boxH: number
+): { x: number; y: number; correlation: number } | null {
+  // The panel is a column down the left; everything right of it is felt.
+  const left = image.width * PANEL_MAX_ORIGIN;
+  const right = image.width;
+  const top = image.height * 0.1;
+  const bottom = image.height * 0.85;
+
+  const look = (
+    x0: number,
+    x1: number,
+    y0: number,
+    y1: number,
+    step: number,
+    scales: number[]
+  ): Hit | null => {
+    let best: Hit | null = null;
+    for (const scale of scales) {
+      const w = boxW * scale;
+      const h = boxH * scale;
+      for (let y = y0; y <= y1 - h; y += step) {
+        for (let x = x0; x <= x1 - w; x += step) {
+          const probe = prepare(avatarSignature(integral, x, y, w, h));
+          if (spread(probe) < SEAT_MIN_CONTRAST) continue;
+          const c = likeness(probe, thumb);
+          if (!best || c > best.correlation)
+            best = { x, y, scale, correlation: c };
+        }
+      }
+    }
+    return best;
+  };
+
+  const coarse = Math.max(8, Math.round(image.width / 120));
+  const rough = look(left, right, top, bottom, coarse, [1.0, 1.3, 1.6, 1.9, 2.2]);
+  if (!rough) return null;
+
+  const closer = look(
+    rough.x - coarse,
+    rough.x + coarse + boxW * rough.scale,
+    rough.y - coarse,
+    rough.y + coarse + boxH * rough.scale,
+    Math.max(2, Math.round(coarse / 4)),
+    [
+      rough.scale - 0.15,
+      rough.scale - 0.075,
+      rough.scale,
+      rough.scale + 0.075,
+      rough.scale + 0.15,
+    ].filter(s => s >= 0.9)
+  );
+
+  const best = closer && closer.correlation > rough.correlation ? closer : rough;
+  return {
+    x: best.x + (boxW * best.scale) / 2,
+    y: best.y + (boxH * best.scale) / 2,
+    correlation: best.correlation,
+  };
+}
+
+/**
+ * Work out which panel row sits at the user's seat, from seats already located.
+ *
+ * Every reading of the table is tried, exactly as the board-anchored search
+ * tries them: a set of occupied seats, and a starting seat for the panel to
+ * count from. A reading says which seat each located row should be sitting at,
+ * and the seats have fixed offsets from the middle of the table — so the
+ * reading predicts every position up to a scale and an origin, and those two
+ * are what the observations decide. Fitting them is a least squares with a
+ * closed form, so every reading costs a few dozen multiplications.
+ *
+ * The reading that puts the seats closest to where they were actually found
+ * wins, and the user is the row that lands on the seat at the bottom.
+ */
+function fitSeatRing(
+  found: FoundSeat[],
+  candidates: number[],
+  places: number[]
+): HeroMatch | null {
+  const seatCount = SEAT_OFFSETS.length;
+  const span = Math.max(...places) - Math.min(...places) + 1;
+  const least = Math.max(2, span, candidates.length);
+
+  // Best residual for each row the search concludes is the user's.
+  const byRow = new Map<number, number>();
+
+  for (let taken = 0; taken < 1 << seatCount; taken++) {
+    if (!(taken & (1 << HERO_SEAT))) continue;
+    const seats: number[] = [];
+    for (let seat = 0; seat < seatCount; seat++)
+      if (taken & (1 << seat)) seats.push(seat);
+    if (seats.length < least) continue;
+
+    const size = seats.length;
+    const heroAt = seats.indexOf(HERO_SEAT);
+    for (let turn = 0; turn < size; turn++) {
+      // Where this reading says each located row should be, in seat offsets.
+      let sx = 0, sy = 0, ox = 0, oy = 0;
+      for (const seat of found) {
+        const at = seats[(((seat.place + turn) % size) + size) % size];
+        sx += SEAT_OFFSETS[at][0];
+        sy += SEAT_OFFSETS[at][1];
+        ox += seat.x;
+        oy += seat.y;
+      }
+      const n = found.length;
+      sx /= n; sy /= n; ox /= n; oy /= n;
+
+      // Uniform scale and origin, by least squares against the offsets.
+      let num = 0;
+      let den = 0;
+      for (const seat of found) {
+        const at = seats[(((seat.place + turn) % size) + size) % size];
+        const dx = SEAT_OFFSETS[at][0] - sx;
+        const dy = SEAT_OFFSETS[at][1] - sy;
+        num += dx * (seat.x - ox) + dy * (seat.y - oy);
+        den += dx * dx + dy * dy;
+      }
+      if (den <= 0) continue;
+      const unit = num / den;
+      // A ring that comes out backwards, or smaller than the avatars sitting on
+      // it, is not a table.
+      if (unit <= 1) continue;
+
+      let residual = 0;
+      for (const seat of found) {
+        const at = seats[(((seat.place + turn) % size) + size) % size];
+        const ex = ox + unit * (SEAT_OFFSETS[at][0] - sx) - seat.x;
+        const ey = oy + unit * (SEAT_OFFSETS[at][1] - sy) - seat.y;
+        residual += ex * ex + ey * ey;
+      }
+      // Root mean square, in board-card heights rather than pixels, so the bar
+      // means the same thing whatever size the window was.
+      const rms = Math.sqrt(residual / n) / unit;
+
+      const heroPlace = (((heroAt - turn) % size) + size) % size;
+      const row = candidates.findIndex(
+        (_, i) => (((places[i] % size) + size) % size) === heroPlace
+      );
+      const key = row < 0 ? -1 : candidates[row];
+      const had = byRow.get(key);
+      if (had === undefined || rms < had) byRow.set(key, rms);
+    }
+  }
+
+  const ranked = [...byRow.entries()].sort((a, b) => a[1] - b[1]);
+  if (ranked.length === 0) return null;
+  if (ranked[0][1] > RING_MAX_RESIDUAL) return null;
+  const runnerUp = ranked.length > 1 ? ranked[1][1] : Infinity;
+  if (runnerUp - ranked[0][1] < RING_MIN_MARGIN) return null;
+  if (ranked[0][0] < 0) return null;
+
+  return {
+    row: ranked[0][0],
+    correlation: found.reduce((s, f) => s + f.correlation, 0) / found.length,
+  };
 }
 
 /**
@@ -1267,6 +1527,27 @@ const HERO_TIEBREAK_MARGIN = 0.1;
  */
 const PANEL_MIN_CONTRAST = 8;
 const SEAT_MIN_CONTRAST = 22;
+
+/**
+ * Correlation an avatar found on the felt must reach to be believed as a seat.
+ *
+ * Higher than the bar for claiming a hero outright, because these are not the
+ * answer — they are the measurements the ring is fitted to, and one wrong point
+ * bends the fit rather than merely failing to help.
+ */
+const RING_MIN_CORRELATION = 0.86;
+
+/** Seats that have to be found before a ring is worth fitting at all. */
+const RING_MIN_SEATS = 3;
+
+/**
+ * How far a fitted ring may sit from the seats it was fitted to, measured in
+ * the same units as SEAT_OFFSETS — board-card heights, had there been a board.
+ */
+const RING_MAX_RESIDUAL = 0.75;
+
+/** And how much better than the best competing answer it has to be. */
+const RING_MIN_MARGIN = 0.2;
 
 /** How far either way a seat is searched, in board-card heights. */
 const SEAT_SEARCH_RADIUS = 0.45;

@@ -822,7 +822,7 @@ function App() {
         {/* Kept on the footer's one line: the band above and below the table is
             a fixed height and the felt is sized against it, so a second line
             here would shrink every seat. */}
-        Runs entirely in your browser · nothing is uploaded · VERSION 10.21 ·{' '}
+        Runs entirely in your browser · nothing is uploaded · VERSION 10.22 ·{' '}
         <a
           href="help.html"
           target="_blank"
