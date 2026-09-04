@@ -186,7 +186,7 @@ export async function detectCards(
     // seat with nothing to say it had guessed, which is worse than leaving the
     // seat empty for them to fill in: a wrong hand quietly produces a wrong
     // equity, a missing one is obvious.
-    const hero = findHeroRow(imageData, rows, anchor);
+    const hero = findHeroRow(imageData, rows, anchor, regions);
     const heroRow = hero ? hero.row : -1;
 
     let opponentSeat = 0;

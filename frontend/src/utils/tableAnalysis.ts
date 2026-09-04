@@ -1137,14 +1137,18 @@ export interface HeroMatch {
 export function findHeroRow(
   image: PixelSource,
   rows: CardRegion[][],
-  board?: BoardAnchor | null
+  board?: BoardAnchor | null,
+  regions?: CardRegion[]
 ): HeroMatch | null {
   if (panelRows(rows, image.width).length === 0) return null;
   // A prefix sum over every pixel, which on a large screenshot is a hundred
   // megabytes to fill. One, shared by everything below.
   const integral = buildIntegral(image);
   if (board && board.cards.length >= 3)
-    return findHeroFromSeats(image, rows, board, integral);
+    return (
+      findHeroFromSeats(image, rows, board, integral) ??
+      findHeroBySeatCards(image, rows, board, regions)
+    );
 
   // The sweep answers almost every board-less screenshot and costs a fraction
   // of what the ring fit does, so it goes first and the fit only ever runs on
@@ -1213,6 +1217,83 @@ function findHeroBySweep(
   }
 
   return best && best.correlation >= HERO_MIN_CORRELATION ? best : null;
+}
+
+/**
+ * Find the user by the suits of the cards drawn at their own seat.
+ *
+ * A last resort, for when the panel's order cannot be trusted. Every other way
+ * of finding the user leans on the panel listing players clockwise round the
+ * table, and one screenshot does not: its rows run right, bottom, lower-left,
+ * top, upper-left, and no rotation in either direction produces that. The seat
+ * search had no reading that explained what it saw, tied between two that were
+ * equally wrong, and refused.
+ *
+ * This owes the panel's order nothing. The user's seat is at the bottom
+ * whatever else is true, so the cards lying there are theirs — and a player
+ * whose avatar is buried under an ALL-IN disc is exactly the player whose cards
+ * are face up. They are fanned and only slivers show, so their ranks cannot be
+ * read; their colours can. Reading the suits left to right gives a sequence
+ * that has to appear, in order, among the four cards of whichever panel row is
+ * theirs.
+ *
+ * Cards drop out of that sequence — a spade on a dark felt often does not
+ * register — so it is matched as a subsequence rather than outright. What makes
+ * it safe is insisting the answer be the only one: three suits in order match
+ * one row of a panel and not another, and where two rows could both account for
+ * them nothing is claimed.
+ */
+function findHeroBySeatCards(
+  image: PixelSource,
+  rows: CardRegion[][],
+  board: BoardAnchor,
+  regions?: CardRegion[]
+): HeroMatch | null {
+  if (!regions) return null;
+
+  const last = board.cards[board.cards.length - 1];
+  const unit = board.unitY;
+  const seatX =
+    (board.originX + last.x + last.width) / 2 + SEAT_OFFSETS[HERO_SEAT][0] * unit;
+  const seatY =
+    board.originY + unit / 2 + SEAT_OFFSETS[HERO_SEAT][1] * unit;
+
+  // The hand is dealt above and to the right of the nameplate the seat is
+  // measured by, and the box is cut to reach it without touching the seats
+  // either side — the nearest of those sits three and a half board cards away.
+  const fan = regions
+    .filter(r => {
+      if (board.cards.includes(r)) return false;
+      const aspect = r.width / r.height;
+      return (
+        aspect >= 0.4 &&
+        aspect <= 1.6 &&
+        r.height >= unit * 0.35 &&
+        r.height <= unit * 1.2 &&
+        r.x >= seatX - unit * 1.5 &&
+        r.x <= seatX + unit * 2.5 &&
+        r.y >= seatY - unit * 2 &&
+        r.y <= seatY + unit * 0.5
+      );
+    })
+    .sort((a, b) => a.x - b.x);
+
+  // Two cards is not enough to tell one hand from another; three in order is.
+  if (fan.length < 3) return null;
+  const seen = fan.map(r => r.suit);
+
+  /** Whether these suits appear in this order among a row's cards. */
+  const runsThrough = (row: CardRegion[]) => {
+    let at = 0;
+    for (const card of row) if (at < seen.length && card.suit === seen[at]) at++;
+    return at === seen.length;
+  };
+
+  const candidates = panelRows(rows, image.width);
+  const matched = candidates.filter(i => runsThrough(rows[i]));
+  if (matched.length !== 1) return null;
+
+  return { row: matched[0], correlation: HERO_MIN_CORRELATION };
 }
 
 /** A panel row's avatar, found somewhere on the felt. */
