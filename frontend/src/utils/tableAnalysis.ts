@@ -1278,9 +1278,29 @@ function findHeroBySeatCards(
     })
     .sort((a, b) => a.x - b.x);
 
-  // Two cards is not enough to tell one hand from another; three in order is.
-  if (fan.length < 3) return null;
-  const seen = fan.map(r => r.suit);
+  // A hand is dealt along one line, and the seat has other things on it that
+  // are card-shaped and card-sized. The ALL-IN disc is the one that matters,
+  // since it is over every seat this is asked about: on one screenshot it came
+  // through as a fifth card and put a spade in front of three hearts, which
+  // then matched nobody. Keeping only the cards that share a top edge with the
+  // most others leaves the hand and drops whatever is sitting below it.
+  const sharing = (r: CardRegion) =>
+    fan.filter(other => Math.abs(other.y - r.y) <= unit * 0.25);
+  let online: CardRegion[] = [];
+  for (const r of fan) {
+    const line = sharing(r);
+    if (line.length > online.length) online = line;
+  }
+
+  // Two is enough, because it is the uniqueness below that does the work and
+  // not the length. Against the twenty-nine screenshots where the seat search
+  // already knows the answer, a run of two or more picked out a single row
+  // twelve times and was right every time; insisting on three only cost three
+  // of those and got nothing back. Two also has to be allowed: cards in a fan
+  // overlap, and two of one hand arrived merged into a single region, which
+  // left a four-card hand showing two.
+  if (online.length < 2) return null;
+  const seen = online.map(r => r.suit);
 
   /** Whether these suits appear in this order among a row's cards. */
   const runsThrough = (row: CardRegion[]) => {
