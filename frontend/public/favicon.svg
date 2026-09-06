@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Ace of diamonds">
+  <!--
+    The app's own card, cut down to what survives at sixteen pixels. The blue
+    ground and the pip are the ones the deck is drawn with, so the tab and the
+    felt show the same card.
+
+    Laid out as a real card's corner index rather than as the app draws a face
+    at full size — pip beside the rank instead of a large rank underneath it.
+    Tried the other way round and the two touched: at sixteen pixels the pip
+    sits on the apex of the A and the pair read as one letter. Here the rank
+    keeps the middle of the card and the pip has a corner to itself, which is
+    the only arrangement of the two that stays legible that small.
+  -->
+  <rect x="1.8" y="1.8" width="28.4" height="28.4" rx="5"
+        fill="#1f5fd0" stroke="#ffffff" stroke-width="1.4" />
+  <g fill="#ffffff" transform="translate(8.4 8.6) scale(0.3)">
+    <path d="M3.243,-4.725C1.126,-7.589 0,-10.5 0,-10.5C0,-10.5 -1.126,-7.589 -3.243,-4.725C-5.361,-1.862 -8,0 -8,0C-8,0 -5.361,1.861 -3.243,4.726C-1.126,7.589 0,10.5 0,10.5C0,10.5 1.126,7.589 3.243,4.726C5.361,1.861 8,0 8,0C8,0 5.361,-1.862 3.243,-4.725Z" />
+  </g>
+  <text x="17.5" y="26.5" fill="#ffffff" text-anchor="middle"
+        font-family="ui-sans-serif, system-ui, -apple-system, Arial, sans-serif"
+        font-size="19" font-weight="700">A</text>
+</svg>
