@@ -525,12 +525,7 @@ export function findHandRows(
   // by left edge and keeping the largest group settles it — the panel is a
   // column and every row in it starts at the same x, while a seat's cards
   // start wherever that seat is.
-  const inPanel = image
-    ? panelRows(usable, image.width).map(i => usable[i])
-    : [];
-  const chosen = inPanel.length > 0 ? inPanel : usable;
-
-  const filled = image ? chosen.map(row => fillRowGaps(row, image)) : chosen;
+  const filled = image ? usable.map(row => fillRowGaps(row, image)) : usable;
 
   // The panel lists four cards for every player it names, so a row from it
   // still short of four once the gaps are filled was not fully detected — and
@@ -543,15 +538,30 @@ export function findHandRows(
   // than the hand simply being absent — a phantom takes real cards out of the
   // deck and every equity on the table is then wrong.
   //
+  // This has to be settled before the rows are grouped, not after. A face-down
+  // row that half registered keeps whichever cards were brightest, and on one
+  // panel that was the last two of every one of them — so those rows all began
+  // at the same wrong x, formed a group of their own three strong, and being
+  // the largest group they were taken for the panel while the two real hands
+  // were discarded.
+  //
   // Nothing is lost by insisting. Equity needs all four cards of a hand, so a
   // row that arrives short cannot be priced anyway. Only the panel is held to
   // this: a seat's own cards are fanned, and reading some of them is the best
   // that can be done there.
-  const whole =
-    inPanel.length > 0
-      ? filled.filter(row => row.length >= CARDS_IN_HAND)
-      : filled;
-  const faceUp = image ? whole.filter(row => !isFaceDown(row, image)) : whole;
+  const whole = image
+    ? filled.filter(
+        row =>
+          row[0].x >= image.width * PANEL_MAX_ORIGIN ||
+          row.length >= CARDS_IN_HAND
+      )
+    : filled;
+
+  const inPanel = image
+    ? panelRows(whole, image.width).map(i => whole[i])
+    : [];
+  const chosen = inPanel.length > 0 ? inPanel : whole;
+  const faceUp = image ? chosen.filter(row => !isFaceDown(row, image)) : chosen;
 
   // Sized against the board only after each row has been squared up to its own
   // median. A dimmed card stops registering partway down and comes back short,
@@ -1109,13 +1119,31 @@ function panelRows(rows: CardRegion[][], imageWidth: number): number[] {
   // Group by left edge and keep the largest group, so that a stray region far
   // down the panel's own column can't drag the set sideways. Ties go to the
   // leftmost, the panel being the leftmost thing on the table.
-  const bucket = (i: number) => Math.round(rows[i][0].x / 8) * 8;
-  const counts = new Map<number, number>();
-  for (const i of left) counts.set(bucket(i), (counts.get(bucket(i)) ?? 0) + 1);
-  const origin = [...counts.entries()].sort(
-    (a, b) => b[1] - a[1] || a[0] - b[0]
-  )[0][0];
-  return left.filter(i => bucket(i) === origin);
+  //
+  // Grouped by how near the edges are to each other rather than by rounding
+  // them into fixed buckets. Two rows of one panel measured 211 and 212 pixels
+  // in, a bucket boundary fell between them, and a panel of two was split into
+  // two panels of one — after which the tie handed the answer to whichever came
+  // first. Half a card's width is the tolerance: wide enough for rows that only
+  // disagree by rounding, and far narrower than the gap to a seat's own cards
+  // out on the felt, which is what this is really here to exclude.
+  const near = (a: number, b: number) =>
+    Math.abs(rows[a][0].x - rows[b][0].x) <= rows[a][0].width * 0.5;
+
+  let best: number[] = [];
+  let anchor = 0;
+  for (const i of left) {
+    const group = left.filter(j => near(i, j));
+    if (
+      best.length === 0 ||
+      group.length > best.length ||
+      (group.length === best.length && rows[i][0].x < anchor)
+    ) {
+      best = group;
+      anchor = rows[i][0].x;
+    }
+  }
+  return best;
 }
 
 export interface HeroMatch {
