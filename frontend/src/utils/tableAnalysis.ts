@@ -612,6 +612,13 @@ function isFaceDown(row: CardRegion[], image: PixelSource): boolean {
     return box ? crop(image, box.x, box.y, box.width, box.height) : null;
   });
 
+  // Whether anything is printed where the ranks go, which settles it on its own
+  // when the backs are not alike enough for the comparison below to.
+  if (ranks.every(patch => patch !== null)) {
+    const ink = median(ranks.map(patch => spread(prepare(patch as number[]))));
+    if (ink < FACE_DOWN_MAX_INK) return true;
+  }
+
   for (let a = 0; a < ranks.length; a++)
     for (let b = a + 1; b < ranks.length; b++) {
       const one = ranks[a];
@@ -631,6 +638,22 @@ function isFaceDown(row: CardRegion[], image: PixelSource): boolean {
  * came close on likeness also agreed on suit.
  */
 const FACE_DOWN_MIN_LIKENESS = 0.68;
+
+/**
+ * How much ink a rank's patch has to carry before the card is holding a rank.
+ *
+ * Nothing is printed where a rank would go on a card that is face down, so the
+ * patch there is flat. Measured over the 134 rows that reach the face-down test
+ * across the corpus, every row of backs came in at 4.9 or below and every real
+ * hand at 19.2 or above, so the two do not come close to meeting.
+ *
+ * This is the surer of the two tests. Likeness assumes the four backs are the
+ * same picture, and one panel's were not — the weave runs on across the fan and
+ * each card's corner catches it at a different point, so four identical backs
+ * agreed only at 0.365 and came through as an opponent holding three fives.
+ * Whether they are alike varies; that none of them has a rank on it does not.
+ */
+const FACE_DOWN_MAX_INK = 10;
 
 /**
  * Whether cards this tall could belong to a hand, given the board.
