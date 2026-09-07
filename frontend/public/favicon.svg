@@ -1,22 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Ace of diamonds">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="The four suits">
   <!--
-    The app's own card, cut down to what survives at sixteen pixels. The blue
-    ground and the pip are the ones the deck is drawn with, so the tab and the
-    felt show the same card.
+    The four suits, which is the game: Omaha deals four cards, and four cards is
+    what everything here is built around. Drawn on the app's own dark ground,
+    with the deck's own pip shapes and the colours it paints card faces in, so
+    the tab belongs to the same set as the felt.
 
-    Laid out as a real card's corner index rather than as the app draws a face
-    at full size — pip beside the rank instead of a large rank underneath it.
-    Tried the other way round and the two touched: at sixteen pixels the pip
-    sits on the apex of the A and the pair read as one letter. Here the rank
-    keeps the middle of the card and the pip has a corner to itself, which is
-    the only arrangement of the two that stays legible that small.
+    Set out two by two rather than in a row. A row of four across a square
+    leaves each pip a quarter of the width and most of the height unused; a
+    square grid gives all four the same room and fills the tile.
+
+    The spade is drawn in the pale ink the app uses for it on a dark ground
+    rather than the near-black of a printed card face, which would disappear
+    here. The other three are the card colours unchanged.
+
+    At sixteen pixels the four stop being separately legible and the whole
+    becomes one coloured mark. That is the size a tab actually uses, and a mark
+    is what a tab needs — this one is distinct enough there to be picked out,
+    which is the job.
   -->
   <rect x="1.8" y="1.8" width="28.4" height="28.4" rx="5"
-        fill="#1f5fd0" stroke="#ffffff" stroke-width="1.4" />
-  <g fill="#ffffff" transform="translate(8.4 8.6) scale(0.3)">
+        fill="#10151b" stroke="#3a4450" stroke-width="1.4" />
+
+  <!-- spade, top left -->
+  <g fill="#d6dae0" transform="translate(11 11) scale(0.4524)">
+    <path d="M7.989,3.103C7.747,-0.954 0.242,-8.59 0,-10.5C-0.242,-8.591 -7.747,-0.955 -7.989,3.103C-8.158,5.971 -6.294,7.16 -4.599,7.16C-2.764,7.138 -1.248,4.359 -0.726,3.819C-0.484,4.535 -2.329,10.501 -2.905,10.501L2.906,10.501C2.33,10.501 0.485,4.535 0.727,3.819C1.184,4.315 2.524,7.077 4.601,7.16C6.295,7.159 8.158,5.971 7.989,3.103Z" />
+  </g>
+
+  <!-- heart, top right -->
+  <g fill="#c62430" transform="translate(21 11) scale(0.5)">
+    <path d="M3.676,-9C0.433,-9 0,-5.523 0,-5.523C0,-5.523 -0.433,-9 -3.676,-9C-5.946,-9 -8,-7.441 -8,-4.5C-8,-0.614 -1.421,3.294 0,9C1.352,3.299 8,-0.614 8,-4.5C8,-7.441 5.946,-9 3.676,-9Z" />
+  </g>
+
+  <!-- diamond, bottom left -->
+  <g fill="#1f5fd0" transform="translate(11 21) scale(0.4524)">
     <path d="M3.243,-4.725C1.126,-7.589 0,-10.5 0,-10.5C0,-10.5 -1.126,-7.589 -3.243,-4.725C-5.361,-1.862 -8,0 -8,0C-8,0 -5.361,1.861 -3.243,4.726C-1.126,7.589 0,10.5 0,10.5C0,10.5 1.126,7.589 3.243,4.726C5.361,1.861 8,0 8,0C8,0 5.361,-1.862 3.243,-4.725Z" />
   </g>
-  <text x="17.5" y="26.5" fill="#ffffff" text-anchor="middle"
-        font-family="ui-sans-serif, system-ui, -apple-system, Arial, sans-serif"
-        font-size="19" font-weight="700">A</text>
+
+  <!-- club, bottom right; its path is drawn away from the origin, so it is
+       brought back to centre before being placed like the others -->
+  <g fill="#177a3f" transform="translate(21 21) scale(0.5) translate(-48.132 -23.562)">
+    <path d="M50.291,22.698C50.291,22.698 52.666,20.798 52.666,18.164C52.666,16.622 51.297,14.062 48.132,14.062C44.967,14.062 43.598,16.623 43.598,18.164C43.598,20.798 45.973,22.698 45.973,22.698C43.335,20.643 38.632,22.046 38.632,26.153C38.632,28.209 40.312,30.471 42.95,30.471C46.115,30.471 47.484,27.016 47.484,27.016C47.484,27.016 47.886,30.954 45.541,33.062L50.723,33.062C48.378,30.955 48.78,27.016 48.78,27.016C48.78,27.016 50.149,30.471 53.314,30.471C55.953,30.471 57.632,28.208 57.632,26.153C57.632,22.046 52.929,20.643 50.291,22.698Z" />
+  </g>
 </svg>
