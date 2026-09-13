@@ -100,6 +100,27 @@ const CONFIDENT_MARGIN = 0.25;
 const FULL_DETAIL_GLYPH = 20;
 const SMALL_GLYPH_MIN_SCORE = 0.75;
 
+/**
+ * The smallest a community card can be drawn and still leave the panel legible.
+ *
+ * Everything is measured against the board, and a panel card comes out at about
+ * half its height. Below this the panel's cards are barely twenty pixels and
+ * the rank inside one is eight or nine, against templates of twenty-four by
+ * thirty-two — so there is nothing left to match. On the screenshot that set
+ * this, the panel's cards did not merely read wrongly: they never formed whole
+ * regions at all, breaking into separate pieces for the rank and the pip, and
+ * lowering the size a region has to reach only turned them into more pieces.
+ * Enlarging the picture first was tried too, at one and a half, two and three
+ * times, and read no more of it — the detail was never captured, and no amount
+ * of interpolation puts it back.
+ *
+ * Measured over the corpus: every screenshot whose hands were read had a board
+ * card of 53 pixels or more, and the one that could not had 40. The bar sits
+ * between them, nearer the failure, so that nothing which might still read is
+ * turned away.
+ */
+const MIN_READABLE_BOARD_CARD = 46;
+
 export interface SlotReading {
   role: SlotRole;
   index: number;
@@ -173,8 +194,15 @@ export async function detectCards(
 
   // Hands shown in the client's hands panel. Read only when nothing has been
   // calibrated by hand, so a user's own slots always take precedence.
+  // Whether the picture is big enough for the panel to be worth reading at all.
+  // Below this the hands come back as fragments, and a fragment that happens to
+  // match a template is worse than no hand: it seats an opponent holding cards
+  // nobody was dealt. The board is drawn twice the size and still reads, so it
+  // is kept.
+  const tooSmall = anchor !== null && anchor.unitY < MIN_READABLE_BOARD_CARD;
+
   const handReadings: SlotReading[] = [];
-  if (seatReadings.length === 0) {
+  if (seatReadings.length === 0 && !tooSmall) {
     const rows = anchor
       ? findHandRows(regions, anchor, 2, imageData)
       : findHandRows(regions, { cards: [], originX: 0, originY: 0, unitX: 1, unitY: 1 }, 3, imageData);
@@ -253,12 +281,19 @@ export async function detectCards(
       total > 0
         ? `Read ${total} card${total === 1 ? '' : 's'} in ${describeElapsed(elapsedMs)}` +
           (anchor ? '' : ' (preflop — no community cards dealt)') +
-          // Say so rather than leaving them to notice the empty seat, since
-          // the hands that did read look no different either way.
-          (hero.length === 0 && villains.length > 0
-            ? " — couldn't tell which hand is yours, so add it yourself"
-            : '')
-        : 'No cards read. Is a hand visible in this screenshot?',
+          // Name the reason rather than leaving a first-time user to conclude
+          // the thing is broken. Too small is the one fault they can fix
+          // themselves, and it is the one that looks most like a bug.
+          (tooSmall
+            ? ' — the replay window was too small to read the hands, so only the board was taken. Take the screenshot with the window larger.'
+            : // Say so rather than leaving them to notice the empty seat, since
+              // the hands that did read look no different either way.
+              hero.length === 0 && villains.length > 0
+              ? " — couldn't tell which hand is yours, so add it yourself"
+              : '')
+        : tooSmall
+          ? 'The replay window was too small to read. Take the screenshot with the window larger.'
+          : 'No cards read. Is a hand visible in this screenshot?',
   };
 }
 
